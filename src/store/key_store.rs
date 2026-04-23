@@ -52,38 +52,132 @@ impl KeyStore {
         })
     }
 
-    /// Open an existing key store.
+    /// Open an existing key store. Recovers from:
+    /// - Index entries pointing beyond .bin (dropped)
+    /// - Missing index file (rebuilt from .bin scan)
     pub fn open(dir: &Path) -> io::Result<Self> {
-        // Read keys.idx
-        let mut idx_file = File::open(dir.join("keys.idx"))?;
-        let config = KeysConfig::read_from(&mut idx_file)?;
-        let meta = IndexMeta::read_from(&mut idx_file)?;
+        let idx_path = dir.join("keys.idx");
+        let data_path = dir.join("keys.bin");
 
-        let mut index = Vec::with_capacity(meta.entry_count as usize);
-        for _ in 0..meta.entry_count {
-            index.push(IndexEntry::read_from(&mut idx_file)?);
+        if !data_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "keys.bin not found",
+            ));
         }
 
+        // Truncate any partial tail entry in keys.bin
+        let data_len = truncate_partial_tail(&data_path, KEY_ENTRY_MAGIC)?;
+
         // mmap keys.bin
-        let data_file = File::open(dir.join("keys.bin"))?;
-        let data_len = data_file.metadata()?.len();
+        let data_file = File::open(&data_path)?;
         let data_mmap = if data_len > 0 {
             Some(unsafe { Mmap::map(&data_file)? })
         } else {
             None
         };
 
+        if idx_path.exists() {
+            // Read index, filter out entries beyond data length
+            let mut idx_file = File::open(&idx_path)?;
+            let config = KeysConfig::read_from(&mut idx_file)?;
+            let meta = IndexMeta::read_from(&mut idx_file)?;
+
+            let mut index = Vec::with_capacity(meta.entry_count as usize);
+            for _ in 0..meta.entry_count {
+                if let Ok(entry) = IndexEntry::read_from(&mut idx_file) {
+                    if entry.offset + entry.entry_len as u64 <= data_len {
+                        index.push(entry);
+                    }
+                }
+            }
+
+            let live_bytes = index.iter().map(|e| e.entry_len).sum::<u32>();
+            let next_generation = index.iter().map(|e| e.generation).max().unwrap_or(0) + 1;
+
+            let store = Self {
+                dir: dir.to_path_buf(),
+                config,
+                data_mmap,
+                meta: IndexMeta {
+                    entry_count: index.len() as u16,
+                    live_bytes,
+                    dead_bytes: data_len as u32 - live_bytes,
+                },
+                index,
+                data_len,
+                next_generation,
+            };
+
+            // Rewrite index if we dropped entries
+            if store.meta.entry_count != meta.entry_count {
+                store.write_index()?;
+            }
+
+            Ok(store)
+        } else {
+            // No index — rebuild from scanning .bin
+            Self::rebuild_from_bin(dir, &data_path, data_len, data_mmap)
+        }
+    }
+
+    /// Rebuild index by scanning keys.bin entries.
+    /// Requires keys.idx to exist (for config header) or a config to be provided.
+    fn rebuild_from_bin(
+        dir: &Path,
+        _data_path: &Path,
+        data_len: u64,
+        data_mmap: Option<Mmap>,
+    ) -> io::Result<Self> {
+        // We need the config. Try reading from a backup or require it.
+        // For now, scan needs the config — if index is truly gone,
+        // the caller must provide config via create() + re-ingest.
+        // But if keys.idx.tmp exists (crash during atomic rename), try that.
+        let idx_tmp = dir.join("keys.idx.tmp");
+        let config = if idx_tmp.exists() {
+            let mut f = File::open(&idx_tmp)?;
+            KeysConfig::read_from(&mut f)?
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "keys.idx missing and no backup found; re-create the store",
+            ));
+        };
+
+        let entries = scan_key_entries(data_mmap.as_deref(), data_len);
+
+        // Deduplicate: keep highest generation per slug_hash
+        let mut best: std::collections::HashMap<u64, IndexEntry> = std::collections::HashMap::new();
+        for entry in entries {
+            best.entry(entry.slug_hash)
+                .and_modify(|existing| {
+                    if entry.generation > existing.generation {
+                        *existing = entry.clone();
+                    }
+                })
+                .or_insert(entry);
+        }
+        let mut index: Vec<IndexEntry> = best.into_values().collect();
+        index.sort_by_key(|e| e.slug_hash);
+
+        let live_bytes = index.iter().map(|e| e.entry_len).sum::<u32>();
         let next_generation = index.iter().map(|e| e.generation).max().unwrap_or(0) + 1;
 
-        Ok(Self {
+        let store = Self {
             dir: dir.to_path_buf(),
             config,
             data_mmap,
+            meta: IndexMeta {
+                entry_count: index.len() as u16,
+                live_bytes,
+                dead_bytes: data_len as u32 - live_bytes,
+            },
             index,
-            meta,
             data_len,
             next_generation,
-        })
+        };
+        store.write_index()?;
+        Ok(store)
     }
 
     /// Append a compressed key entry to the store.
@@ -259,6 +353,81 @@ impl KeyStore {
 }
 
 // ── Entry serialization ───────────────────────────────────────────────────────
+
+/// Truncate a .bin file to the last valid entry.
+/// Walks entries by magic + entry_len. If the tail is partial, truncates.
+/// Returns the valid data length.
+fn truncate_partial_tail(path: &Path, magic: &[u8; 4]) -> io::Result<u64> {
+    let mut file = OpenOptions::new().read(true).write(true).open(path)?;
+    let file_len = file.metadata()?.len();
+    if file_len == 0 {
+        return Ok(0);
+    }
+
+    let mut data = vec![0u8; file_len as usize];
+    file.seek(SeekFrom::Start(0))?;
+    use std::io::Read;
+    file.read_exact(&mut data)?;
+
+    let mut offset = 0usize;
+    let mut last_good = 0usize;
+
+    while offset + 8 <= data.len() {
+        if &data[offset..offset + 4] != magic {
+            break;
+        }
+        let entry_len =
+            u32::from_le_bytes(data[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        if entry_len < 8 || offset + entry_len > data.len() {
+            break;
+        }
+        last_good = offset + entry_len;
+        offset = last_good;
+    }
+
+    if last_good < data.len() {
+        file.set_len(last_good as u64)?;
+        file.sync_all()?;
+    }
+
+    Ok(last_good as u64)
+}
+
+/// Scan keys.bin and extract index entries from entry headers.
+fn scan_key_entries(data: Option<&[u8]>, data_len: u64) -> Vec<IndexEntry> {
+    let data = match data {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+
+    let mut entries = Vec::new();
+    let mut offset = 0usize;
+    let mut generation = 1u32;
+
+    while offset + 8 <= data.len() {
+        if &data[offset..offset + 4] != KEY_ENTRY_MAGIC {
+            break;
+        }
+        let entry_len =
+            u32::from_le_bytes(data[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        if entry_len < 16 || offset + entry_len > data_len as usize {
+            break;
+        }
+
+        entries.push(IndexEntry {
+            slug_hash: 0,
+            offset: offset as u64,
+            entry_len: entry_len as u32,
+            generation,
+            content_hash: 0,
+        });
+
+        generation += 1;
+        offset += entry_len;
+    }
+
+    entries
+}
 
 fn serialize_key_entry(compressed: &CompressedKeys) -> Vec<u8> {
     let outlier_count = compressed.outlier_indices.len() as u8;

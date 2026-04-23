@@ -305,3 +305,142 @@ fn test_compact_survives_reopen() {
         assert!(store2.get_page(slug).is_some());
     }
 }
+
+#[test]
+fn test_truncated_tail_recovery() {
+    let dir = tempdir().unwrap();
+    let kc = keys_config();
+    let mut store = KeyStore::create(dir.path(), kc.clone()).unwrap();
+    let sketch = kc.build_sketch();
+
+    let mut rng = ChaCha20Rng::seed_from_u64(700);
+    let keys = random_vec(4 * 16, &mut rng);
+    let compressed = sketch.quantize(&keys, 4, &[0u8]);
+    store.append(0xAA, 0xBB, &compressed).unwrap();
+
+    let good_size = std::fs::metadata(dir.path().join("keys.bin"))
+        .unwrap()
+        .len();
+
+    // Append garbage to simulate crash mid-write
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(dir.path().join("keys.bin"))
+            .unwrap();
+        f.write_all(&[0xDE; 50]).unwrap();
+    }
+
+    // Reopen should truncate the garbage
+    let store2 = KeyStore::open(dir.path()).unwrap();
+    assert_eq!(store2.len(), 1);
+    assert!(store2.get_page(0xAA).is_some());
+
+    let recovered_size = std::fs::metadata(dir.path().join("keys.bin"))
+        .unwrap()
+        .len();
+    assert_eq!(recovered_size, good_size);
+}
+
+#[test]
+fn test_index_ahead_of_store() {
+    let dir = tempdir().unwrap();
+    let kc = keys_config();
+    let mut store = KeyStore::create(dir.path(), kc.clone()).unwrap();
+    let sketch = kc.build_sketch();
+
+    let mut rng = ChaCha20Rng::seed_from_u64(800);
+
+    // Write 2 pages
+    for slug in 0u64..2 {
+        let keys = random_vec(4 * 16, &mut rng);
+        let compressed = sketch.quantize(&keys, 4, &[0u8]);
+        store.append(slug, slug * 10, &compressed).unwrap();
+    }
+    drop(store);
+
+    // Truncate keys.bin to roughly half (kills second entry)
+    let full_size = std::fs::metadata(dir.path().join("keys.bin"))
+        .unwrap()
+        .len();
+    {
+        let f = std::fs::File::options()
+            .write(true)
+            .open(dir.path().join("keys.bin"))
+            .unwrap();
+        f.set_len(full_size / 2).unwrap();
+    }
+
+    // Reopen — should drop entries beyond EOF
+    let store2 = KeyStore::open(dir.path()).unwrap();
+    // At most 1 page survives (the first one, if it fits in half)
+    assert!(store2.len() <= 1);
+    // Should not panic or return corrupt data
+    if store2.len() == 1 {
+        assert!(store2.get_page(0).is_some());
+    }
+}
+
+#[test]
+fn test_value_store_truncated_tail_recovery() {
+    let dir = tempdir().unwrap();
+    let vc = values_config();
+    let mut store = ValueStore::create(dir.path(), vc).unwrap();
+
+    let values: Vec<f32> = (0..8).map(|i| i as f32).collect();
+    let compressed = quantize_values(&values, 8, 4);
+    store.append(0xAA, 0xBB, &compressed).unwrap();
+
+    let good_size = std::fs::metadata(dir.path().join("values.bin"))
+        .unwrap()
+        .len();
+
+    // Append garbage
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(dir.path().join("values.bin"))
+            .unwrap();
+        f.write_all(&[0xDE; 50]).unwrap();
+    }
+
+    let store2 = ValueStore::open(dir.path()).unwrap();
+    assert_eq!(store2.len(), 1);
+    assert!(store2.get_page(0xAA).is_some());
+
+    let recovered_size = std::fs::metadata(dir.path().join("values.bin"))
+        .unwrap()
+        .len();
+    assert_eq!(recovered_size, good_size);
+}
+
+#[test]
+fn test_value_store_index_ahead_of_store() {
+    let dir = tempdir().unwrap();
+    let vc = values_config();
+    let mut store = ValueStore::create(dir.path(), vc).unwrap();
+
+    for slug in 0u64..2 {
+        let values: Vec<f32> = (0..8).map(|i| (slug as f32) + i as f32).collect();
+        let compressed = quantize_values(&values, 8, 4);
+        store.append(slug, slug * 10, &compressed).unwrap();
+    }
+    drop(store);
+
+    // Truncate values.bin to roughly half
+    let full_size = std::fs::metadata(dir.path().join("values.bin"))
+        .unwrap()
+        .len();
+    {
+        let f = std::fs::File::options()
+            .write(true)
+            .open(dir.path().join("values.bin"))
+            .unwrap();
+        f.set_len(full_size / 2).unwrap();
+    }
+
+    let store2 = ValueStore::open(dir.path()).unwrap();
+    assert!(store2.len() <= 1);
+}

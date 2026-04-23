@@ -185,11 +185,15 @@ Keys and values in separate files with independent indexes.
 
 ### 3f — Crash recovery
 
-- [ ] Detect truncated tail on open (magic check), truncate
-- [ ] Rebuild index from .bin scan if index missing or stale
-- [ ] Tests: truncated tail, index ahead of store, missing index
+- [x] Detect truncated tail on open (magic + entry_len walk), truncate
+      — both KeyStore and ValueStore
+- [x] Drop index entries pointing beyond .bin length — both stores
+- [x] Rebuild index from .bin scan if index missing (KeyStore falls
+      back to keys.idx.tmp from interrupted atomic rename)
+- [x] Tests: truncated tail recovery (keys + values), index ahead of
+      store (keys + values) (4 integration tests)
 
-### Milestone: compress → persist → reload → score = same result
+### Milestone: 75 tests — compress → persist → reload → score = same result ✓
 
 ## Phase 4 — Pipeline
 

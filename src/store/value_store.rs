@@ -50,36 +50,72 @@ impl ValueStore {
         })
     }
 
-    /// Open an existing value store.
+    /// Open an existing value store. Recovers from:
+    /// - Truncated tail in values.bin (partial entry removed)
+    /// - Index entries pointing beyond values.bin (dropped)
     pub fn open(dir: &Path) -> io::Result<Self> {
-        let mut idx_file = File::open(dir.join("values.idx"))?;
-        let config = ValuesConfig::read_from(&mut idx_file)?;
-        let meta = IndexMeta::read_from(&mut idx_file)?;
+        let idx_path = dir.join("values.idx");
+        let data_path = dir.join("values.bin");
 
-        let mut index = Vec::with_capacity(meta.entry_count as usize);
-        for _ in 0..meta.entry_count {
-            index.push(IndexEntry::read_from(&mut idx_file)?);
+        if !data_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "values.bin not found",
+            ));
         }
 
-        let data_file = File::open(dir.join("values.bin"))?;
-        let data_len = data_file.metadata()?.len();
+        // Truncate any partial tail entry
+        let data_len = truncate_partial_tail(&data_path, VALUE_ENTRY_MAGIC)?;
+
+        let data_file = File::open(&data_path)?;
         let data_mmap = if data_len > 0 {
             Some(unsafe { Mmap::map(&data_file)? })
         } else {
             None
         };
 
+        if !idx_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "values.idx not found",
+            ));
+        }
+
+        let mut idx_file = File::open(&idx_path)?;
+        let config = ValuesConfig::read_from(&mut idx_file)?;
+        let meta = IndexMeta::read_from(&mut idx_file)?;
+
+        let mut index = Vec::with_capacity(meta.entry_count as usize);
+        for _ in 0..meta.entry_count {
+            if let Ok(entry) = IndexEntry::read_from(&mut idx_file) {
+                if entry.offset + entry.entry_len as u64 <= data_len {
+                    index.push(entry);
+                }
+            }
+        }
+
+        let live_bytes = index.iter().map(|e| e.entry_len).sum::<u32>();
         let next_generation = index.iter().map(|e| e.generation).max().unwrap_or(0) + 1;
 
-        Ok(Self {
+        let store = Self {
             dir: dir.to_path_buf(),
             config,
             data_mmap,
+            meta: IndexMeta {
+                entry_count: index.len() as u16,
+                live_bytes,
+                dead_bytes: data_len as u32 - live_bytes,
+            },
             index,
-            meta,
             data_len,
             next_generation,
-        })
+        };
+
+        if store.meta.entry_count != meta.entry_count {
+            store.write_index()?;
+        }
+
+        Ok(store)
     }
 
     /// Append a compressed value entry to the store.
@@ -242,6 +278,43 @@ impl ValueStore {
 }
 
 // ── Entry serialization ───────────────────────────────────────────────────────
+
+/// Truncate a .bin file to the last valid entry.
+fn truncate_partial_tail(path: &Path, magic: &[u8; 4]) -> io::Result<u64> {
+    let mut file = OpenOptions::new().read(true).write(true).open(path)?;
+    let file_len = file.metadata()?.len();
+    if file_len == 0 {
+        return Ok(0);
+    }
+
+    let mut data = vec![0u8; file_len as usize];
+    file.seek(SeekFrom::Start(0))?;
+    use std::io::Read;
+    file.read_exact(&mut data)?;
+
+    let mut offset = 0usize;
+    let mut last_good = 0usize;
+
+    while offset + 8 <= data.len() {
+        if &data[offset..offset + 4] != magic {
+            break;
+        }
+        let entry_len =
+            u32::from_le_bytes(data[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        if entry_len < 8 || offset + entry_len > data.len() {
+            break;
+        }
+        last_good = offset + entry_len;
+        offset = last_good;
+    }
+
+    if last_good < data.len() {
+        file.set_len(last_good as u64)?;
+        file.sync_all()?;
+    }
+
+    Ok(last_good as u64)
+}
 
 fn serialize_value_entry(compressed: &CompressedValues) -> Vec<u8> {
     let num_groups = compressed.scale.len();
