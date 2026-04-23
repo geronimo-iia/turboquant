@@ -92,15 +92,59 @@ One module per concern. No persistence, no pipeline — pure math.
 
 ## Phase 2 — Quality validation
 
-Statistical tests comparing our implementation against exact computation
-and the Python reference.
+Statistical tests proving our implementation preserves the properties
+that TurboQuant guarantees. Each test is self-contained (no external
+fixtures). Quality tests are `#[ignore]` by default — they run 10K+
+iterations.
 
-- [ ] `tests/quality/test_distortion.rs` — MSE / signal over 10K pairs,
-      assert < 0.15
-- [ ] `tests/quality/test_ranking.rs` — Kendall's tau > 0.90 on 100
-      vectors, top-10 recall ≥ 0.8
-- [ ] `tests/quality/test_bit_sweep.rs` — distortion monotonically
-      increases as bits decrease
+### 2a — Rotation preserves geometry
+
+The orthogonal projection must not distort vectors.
+
+- [ ] `test_rotation_preserves_norm` — for 1K random vectors,
+      assert `||proj @ v|| / ||v||` is within [0.95, 1.05] of `sqrt(d)`
+      (the scale factor)
+- [ ] `test_rotation_preserves_inner_product` — for 1K random (q, k)
+      pairs, compute `dot(proj@q, proj@k)` vs `d * dot(q, k)`.
+      Assert relative error < 0.1 on average.
+
+### 2b — Sign quantization distortion
+
+The paper claims ~2.7x optimal distortion rate.
+
+- [ ] `test_distortion_rate` — for 10K random (q, k) pairs:
+      `distortion = E[|dot(q,k) - score(q, compress(k))|²] / E[|dot(q,k)|²]`
+      Assert distortion < 0.20 at sketch_dim = 2 * head_dim.
+- [ ] `test_distortion_decreases_with_sketch_dim` — measure distortion
+      at sketch_dim = d, 2d, 4d. Assert monotonically decreasing.
+
+### 2c — Ranking preservation
+
+The practical test: does compression preserve which keys are most
+relevant?
+
+- [ ] `test_top_k_recall` — 1 query + 200 keys. Compute exact top-10
+      and compressed top-10. Assert recall ≥ 0.7 (at least 7 of 10
+      match). Run 100 trials, assert mean recall ≥ 0.8.
+- [ ] `test_kendall_tau` — 1 query + 100 keys. Compute Kendall's tau
+      between exact ranking and compressed ranking. Assert tau > 0.85
+      averaged over 50 trials.
+
+### 2d — Value quantization accuracy
+
+- [ ] `test_value_quantized_matmul_error` — for 1K random
+      (weights, values) pairs, compare exact `weights @ values` vs
+      `quantized_dot(weights, compress(values))`. Assert mean relative
+      error < 0.05 at 4-bit, < 0.15 at 2-bit.
+
+### 2e — Outlier separation benefit
+
+Outlier separation should improve score quality on vectors with spikes.
+
+- [ ] `test_outlier_vs_no_outlier` — generate vectors with 2 outlier
+      dimensions (10x magnitude). Compare distortion with
+      outlier_count=2 vs outlier_count=0. Assert outlier separation
+      reduces distortion by at least 20%.
 
 ### Milestone: `cargo test quality` — ranking preservation proven
 
