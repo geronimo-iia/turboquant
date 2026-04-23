@@ -1,7 +1,8 @@
+use crate::error::{QjlError, Result};
 use crate::quantize::CompressedKeys;
 use crate::store::config::{IndexEntry, IndexMeta, KeysConfig, KEY_ENTRY_MAGIC};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use memmap2::Mmap;
@@ -28,7 +29,7 @@ pub struct KeyPageView<'a> {
 
 impl KeyStore {
     /// Create a new empty key store.
-    pub fn create(dir: &Path, config: KeysConfig) -> io::Result<Self> {
+    pub fn create(dir: &Path, config: KeysConfig) -> Result<Self> {
         fs::create_dir_all(dir)?;
 
         // Write empty keys.bin
@@ -55,15 +56,15 @@ impl KeyStore {
     /// Open an existing key store. Recovers from:
     /// - Index entries pointing beyond .bin (dropped)
     /// - Missing index file (rebuilt from .bin scan)
-    pub fn open(dir: &Path) -> io::Result<Self> {
+    pub fn open(dir: &Path) -> Result<Self> {
         let idx_path = dir.join("keys.idx");
         let data_path = dir.join("keys.bin");
 
         if !data_path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
+            return Err(QjlError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
                 "keys.bin not found",
-            ));
+            )));
         }
 
         // Truncate any partial tail entry in keys.bin
@@ -128,7 +129,7 @@ impl KeyStore {
         _data_path: &Path,
         data_len: u64,
         data_mmap: Option<Mmap>,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
         // We need the config. Try reading from a backup or require it.
         // For now, scan needs the config — if index is truly gone,
         // the caller must provide config via create() + re-ingest.
@@ -138,10 +139,10 @@ impl KeyStore {
             let mut f = File::open(&idx_tmp)?;
             KeysConfig::read_from(&mut f)?
         } else {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
+            return Err(QjlError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
                 "keys.idx missing and no backup found; re-create the store",
-            ));
+            )));
         };
 
         let entries = scan_key_entries(data_mmap.as_deref(), data_len);
@@ -186,7 +187,7 @@ impl KeyStore {
         slug_hash: u64,
         content_hash: u64,
         compressed: &CompressedKeys,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         // Serialize entry
         let entry_data = serialize_key_entry(compressed);
         let entry_len = entry_data.len() as u32;
@@ -284,7 +285,7 @@ impl KeyStore {
     }
 
     /// Compact the store — rewrite only live entries, reclaim dead space.
-    pub fn compact(&mut self) -> io::Result<()> {
+    pub fn compact(&mut self) -> Result<()> {
         let data_path = self.dir.join("keys.bin");
         let tmp_path = self.dir.join("keys.bin.compact");
 
@@ -336,7 +337,7 @@ impl KeyStore {
         Ok(())
     }
 
-    fn write_index(&self) -> io::Result<()> {
+    fn write_index(&self) -> Result<()> {
         let tmp_path = self.dir.join("keys.idx.tmp");
         let final_path = self.dir.join("keys.idx");
 
@@ -357,7 +358,7 @@ impl KeyStore {
 /// Truncate a .bin file to the last valid entry.
 /// Walks entries by magic + entry_len. If the tail is partial, truncates.
 /// Returns the valid data length.
-fn truncate_partial_tail(path: &Path, magic: &[u8; 4]) -> io::Result<u64> {
+fn truncate_partial_tail(path: &Path, magic: &[u8; 4]) -> Result<u64> {
     let mut file = OpenOptions::new().read(true).write(true).open(path)?;
     let file_len = file.metadata()?.len();
     if file_len == 0 {

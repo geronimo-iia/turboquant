@@ -1,7 +1,8 @@
+use crate::error::{QjlError, Result};
 use crate::store::config::{IndexEntry, IndexMeta, ValuesConfig, VALUE_ENTRY_MAGIC};
 use crate::values::CompressedValues;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use memmap2::Mmap;
@@ -28,7 +29,7 @@ pub struct ValuePageView<'a> {
 
 impl ValueStore {
     /// Create a new empty value store.
-    pub fn create(dir: &Path, config: ValuesConfig) -> io::Result<Self> {
+    pub fn create(dir: &Path, config: ValuesConfig) -> Result<Self> {
         fs::create_dir_all(dir)?;
 
         File::create(dir.join("values.bin"))?;
@@ -53,15 +54,15 @@ impl ValueStore {
     /// Open an existing value store. Recovers from:
     /// - Truncated tail in values.bin (partial entry removed)
     /// - Index entries pointing beyond values.bin (dropped)
-    pub fn open(dir: &Path) -> io::Result<Self> {
+    pub fn open(dir: &Path) -> Result<Self> {
         let idx_path = dir.join("values.idx");
         let data_path = dir.join("values.bin");
 
         if !data_path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
+            return Err(QjlError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
                 "values.bin not found",
-            ));
+            )));
         }
 
         // Truncate any partial tail entry
@@ -75,10 +76,10 @@ impl ValueStore {
         };
 
         if !idx_path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
+            return Err(QjlError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
                 "values.idx not found",
-            ));
+            )));
         }
 
         let mut idx_file = File::open(&idx_path)?;
@@ -124,7 +125,7 @@ impl ValueStore {
         slug_hash: u64,
         content_hash: u64,
         compressed: &CompressedValues,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         let entry_data = serialize_value_entry(compressed);
         let entry_len = entry_data.len() as u32;
 
@@ -214,7 +215,7 @@ impl ValueStore {
     }
 
     /// Compact the store — rewrite only live entries, reclaim dead space.
-    pub fn compact(&mut self) -> io::Result<()> {
+    pub fn compact(&mut self) -> Result<()> {
         let data_path = self.dir.join("values.bin");
         let tmp_path = self.dir.join("values.bin.compact");
 
@@ -261,7 +262,7 @@ impl ValueStore {
         Ok(())
     }
 
-    fn write_index(&self) -> io::Result<()> {
+    fn write_index(&self) -> Result<()> {
         let tmp_path = self.dir.join("values.idx.tmp");
         let final_path = self.dir.join("values.idx");
 
@@ -280,7 +281,7 @@ impl ValueStore {
 // ── Entry serialization ───────────────────────────────────────────────────────
 
 /// Truncate a .bin file to the last valid entry.
-fn truncate_partial_tail(path: &Path, magic: &[u8; 4]) -> io::Result<u64> {
+fn truncate_partial_tail(path: &Path, magic: &[u8; 4]) -> Result<u64> {
     let mut file = OpenOptions::new().read(true).write(true).open(path)?;
     let file_len = file.metadata()?.len();
     if file_len == 0 {
