@@ -444,3 +444,59 @@ fn test_value_store_index_ahead_of_store() {
     let store2 = ValueStore::open(dir.path()).unwrap();
     assert!(store2.len() <= 1);
 }
+
+// ── Negative tests ────────────────────────────────────────────────────────────
+
+#[test]
+fn test_nan_input_rejected_in_quantize() {
+    let kc = keys_config();
+    let sketch = kc.build_sketch();
+    let mut keys = vec![1.0f32; 4 * 16];
+    keys[5] = f32::NAN;
+    let result = sketch.quantize(&keys, 4, &[0u8]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_nan_input_rejected_in_score() {
+    let kc = keys_config();
+    let sketch = kc.build_sketch();
+    let keys = vec![1.0f32; 4 * 16];
+    let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
+    let mut query = vec![1.0f32; 16];
+    query[0] = f32::NAN;
+    let result = sketch.score(&query, &compressed);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_dimension_mismatch_in_quantize() {
+    let kc = keys_config();
+    let sketch = kc.build_sketch();
+    let keys = vec![1.0f32; 100]; // wrong size for 4 vectors of dim 16
+    let result = sketch.quantize(&keys, 4, &[0u8]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_dimension_mismatch_in_score() {
+    let kc = keys_config();
+    let sketch = kc.build_sketch();
+    let keys = vec![1.0f32; 4 * 16];
+    let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
+    let query = vec![1.0f32; 8]; // wrong dim
+    let result = sketch.score(&query, &compressed);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_invalid_bit_width_rejected() {
+    let result = quantize_values(&[1.0f32; 8], 8, 3);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_zero_dim_sketch_rejected() {
+    use qjl_sketch::sketch::QJLSketch;
+    assert!(QJLSketch::new(0, 128, 32, 42).is_err());
+}
