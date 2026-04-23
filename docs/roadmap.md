@@ -176,9 +176,12 @@ Keys and values in separate files with independent indexes.
 
 ### 3e — Compaction
 
-- [ ] `compact()` per store — rewrite live entries, rebuild index
-- [ ] Atomic rename for crash safety
-- [ ] Tests: reclaims space, preserves scores, all pages readable
+- [x] `compact()` on KeyStore — rewrite live entries, rebuild index,
+      atomic rename
+- [x] `compact()` on ValueStore — same pattern
+- [x] Tests: key store reclaims space, preserves scores, survives
+      reopen; value store reclaims space, preserves quantized_dot
+      (5 integration tests)
 
 ### 3f — Crash recovery
 

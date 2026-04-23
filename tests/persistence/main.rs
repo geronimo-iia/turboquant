@@ -1,7 +1,7 @@
 use turboquant::store::config::{KeysConfig, ValuesConfig};
 use turboquant::store::key_store::KeyStore;
 use turboquant::store::value_store::ValueStore;
-use turboquant::values::quantize_values;
+use turboquant::values::{quantize_values, quantized_dot};
 
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -139,4 +139,169 @@ fn test_dead_bytes_tracked_after_reopen() {
     let store2 = KeyStore::open(dir.path()).unwrap();
     assert_eq!(store2.dead_bytes(), dead_before);
     assert_eq!(store2.len(), 1);
+}
+
+#[test]
+fn test_key_store_compact_reclaims_space() {
+    let dir = tempdir().unwrap();
+    let kc = keys_config();
+    let mut store = KeyStore::create(dir.path(), kc.clone()).unwrap();
+    let sketch = kc.build_sketch();
+
+    let mut rng = ChaCha20Rng::seed_from_u64(400);
+
+    // Write 5 pages, then update 3 of them (creates dead space)
+    for slug in 0u64..5 {
+        let keys = random_vec(4 * 16, &mut rng);
+        let compressed = sketch.quantize(&keys, 4, &[0u8]);
+        store.append(slug, slug * 10, &compressed).unwrap();
+    }
+    for slug in 0u64..3 {
+        let keys = random_vec(4 * 16, &mut rng);
+        let compressed = sketch.quantize(&keys, 4, &[0u8]);
+        store.append(slug, slug * 100, &compressed).unwrap();
+    }
+
+    assert_eq!(store.len(), 5);
+    assert!(store.dead_bytes() > 0);
+    let size_before = std::fs::metadata(dir.path().join("keys.bin"))
+        .unwrap()
+        .len();
+
+    store.compact().unwrap();
+
+    let size_after = std::fs::metadata(dir.path().join("keys.bin"))
+        .unwrap()
+        .len();
+    assert!(size_after < size_before);
+    assert_eq!(store.dead_bytes(), 0);
+    assert_eq!(store.len(), 5);
+
+    // All pages still readable
+    for slug in 0u64..5 {
+        assert!(store.get_page(slug).is_some());
+    }
+}
+
+#[test]
+fn test_key_store_compact_preserves_scores() {
+    let dir = tempdir().unwrap();
+    let kc = keys_config();
+    let mut store = KeyStore::create(dir.path(), kc.clone()).unwrap();
+    let sketch = kc.build_sketch();
+
+    let mut rng = ChaCha20Rng::seed_from_u64(500);
+    let keys = random_vec(4 * 16, &mut rng);
+    let query = random_vec(16, &mut rng);
+    let compressed = sketch.quantize(&keys, 4, &[0u8]);
+
+    store.append(0xAA, 0x11, &compressed).unwrap();
+    // Update to create dead space
+    store.append(0xAA, 0x22, &compressed).unwrap();
+
+    let page_before = store.get_page(0xAA).unwrap();
+    let score_before = sketch.score(
+        &query,
+        &page_before.to_compressed_keys(kc.head_dim as usize),
+    );
+
+    store.compact().unwrap();
+
+    let page_after = store.get_page(0xAA).unwrap();
+    let score_after = sketch.score(&query, &page_after.to_compressed_keys(kc.head_dim as usize));
+
+    assert_eq!(score_before, score_after);
+}
+
+#[test]
+fn test_value_store_compact_reclaims_space() {
+    let dir = tempdir().unwrap();
+    let vc = values_config();
+    let mut store = ValueStore::create(dir.path(), vc).unwrap();
+
+    for slug in 0u64..5 {
+        let values: Vec<f32> = (0..8).map(|i| (slug as f32) + i as f32).collect();
+        let compressed = quantize_values(&values, 8, 4);
+        store.append(slug, slug * 10, &compressed).unwrap();
+    }
+    for slug in 0u64..3 {
+        let values: Vec<f32> = (0..8).map(|i| (slug as f32) * 2.0 + i as f32).collect();
+        let compressed = quantize_values(&values, 8, 4);
+        store.append(slug, slug * 100, &compressed).unwrap();
+    }
+
+    assert!(store.dead_bytes() > 0);
+    let size_before = std::fs::metadata(dir.path().join("values.bin"))
+        .unwrap()
+        .len();
+
+    store.compact().unwrap();
+
+    let size_after = std::fs::metadata(dir.path().join("values.bin"))
+        .unwrap()
+        .len();
+    assert!(size_after < size_before);
+    assert_eq!(store.dead_bytes(), 0);
+    assert_eq!(store.len(), 5);
+
+    for slug in 0u64..5 {
+        assert!(store.get_page(slug).is_some());
+    }
+}
+
+#[test]
+fn test_value_store_compact_preserves_dot() {
+    let dir = tempdir().unwrap();
+    let vc = values_config();
+    let mut store = ValueStore::create(dir.path(), vc).unwrap();
+
+    let values: Vec<f32> = (0..8).map(|i| i as f32).collect();
+    let weights: Vec<f32> = (0..8).map(|i| (i as f32) * 0.1).collect();
+    let compressed = quantize_values(&values, 8, 4);
+
+    store.append(0xAA, 0x11, &compressed).unwrap();
+    store.append(0xAA, 0x22, &compressed).unwrap();
+
+    let dot_before = quantized_dot(
+        &weights,
+        &store.get_page(0xAA).unwrap().to_compressed_values(),
+    );
+
+    store.compact().unwrap();
+
+    let dot_after = quantized_dot(
+        &weights,
+        &store.get_page(0xAA).unwrap().to_compressed_values(),
+    );
+
+    assert_eq!(dot_before, dot_after);
+}
+
+#[test]
+fn test_compact_survives_reopen() {
+    let dir = tempdir().unwrap();
+    let kc = keys_config();
+    let mut store = KeyStore::create(dir.path(), kc.clone()).unwrap();
+    let sketch = kc.build_sketch();
+
+    let mut rng = ChaCha20Rng::seed_from_u64(600);
+    for slug in 0u64..3 {
+        let keys = random_vec(4 * 16, &mut rng);
+        let compressed = sketch.quantize(&keys, 4, &[0u8]);
+        store.append(slug, slug, &compressed).unwrap();
+    }
+    // Update slug 0 to create dead space
+    let keys = random_vec(4 * 16, &mut rng);
+    let compressed = sketch.quantize(&keys, 4, &[0u8]);
+    store.append(0, 99, &compressed).unwrap();
+
+    store.compact().unwrap();
+
+    // Reopen after compaction
+    let store2 = KeyStore::open(dir.path()).unwrap();
+    assert_eq!(store2.len(), 3);
+    assert_eq!(store2.dead_bytes(), 0);
+    for slug in 0u64..3 {
+        assert!(store2.get_page(slug).is_some());
+    }
 }

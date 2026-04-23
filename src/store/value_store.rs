@@ -177,6 +177,54 @@ impl ValueStore {
         self.meta.dead_bytes
     }
 
+    /// Compact the store — rewrite only live entries, reclaim dead space.
+    pub fn compact(&mut self) -> io::Result<()> {
+        let data_path = self.dir.join("values.bin");
+        let tmp_path = self.dir.join("values.bin.compact");
+
+        let old_mmap = self.data_mmap.take();
+        let old_data = match &old_mmap {
+            Some(m) => &m[..],
+            None => return Ok(()),
+        };
+
+        let mut new_file = File::create(&tmp_path)?;
+        let mut new_index = Vec::with_capacity(self.index.len());
+
+        for entry in &self.index {
+            let start = entry.offset as usize;
+            let end = start + entry.entry_len as usize;
+            if end > old_data.len() {
+                continue;
+            }
+            let new_offset = new_file.seek(SeekFrom::End(0))?;
+            new_file.write_all(&old_data[start..end])?;
+            new_index.push(IndexEntry {
+                offset: new_offset,
+                ..entry.clone()
+            });
+        }
+        new_file.sync_all()?;
+
+        fs::rename(&tmp_path, &data_path)?;
+
+        self.meta.dead_bytes = 0;
+        self.meta.live_bytes = new_index.iter().map(|e| e.entry_len).sum();
+        self.meta.entry_count = new_index.len() as u16;
+        self.index = new_index;
+        self.write_index()?;
+
+        let data_file = File::open(&data_path)?;
+        self.data_len = data_file.metadata()?.len();
+        self.data_mmap = if self.data_len > 0 {
+            Some(unsafe { Mmap::map(&data_file)? })
+        } else {
+            None
+        };
+
+        Ok(())
+    }
+
     fn write_index(&self) -> io::Result<()> {
         let tmp_path = self.dir.join("values.idx.tmp");
         let final_path = self.dir.join("values.idx");
