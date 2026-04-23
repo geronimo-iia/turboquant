@@ -64,41 +64,41 @@ let scores = store.config.build_sketch().score(&query, &reloaded);
 
 Apple M-series, d=128, s=256, 32 vectors/page.
 
-| Operation | Time |
-|-----------|------|
-| Score 1 page | 18 µs |
-| Score 100 pages | 1.8 ms |
-| Score 1000 pages | 18 ms |
-| Key quantize (per vector) | 38 µs |
+| Operation                          | Time   |
+| ---------------------------------- | ------ |
+| Score 1 page                       | 18 µs  |
+| Score 100 pages                    | 1.8 ms |
+| Score 1000 pages                   | 18 ms  |
+| Key quantize (per vector)          | 38 µs  |
 | Value quantize 4-bit (per element) | 2.4 ns |
-| Cold start (100 pages) | 221 µs |
-| Page lookup | 5 ns |
+| Cold start (100 pages)             | 221 µs |
+| Page lookup                        | 5 ns   |
 
 ## Quality
 
 Measured over 10K+ random vector pairs (d=64–128, s=64–512).
 
-| Metric | Value |
-|--------|-------|
-| Distortion (MSE/signal) | < 0.35 at s=2d |
-| Top-10 recall | ≥ 0.55 mean |
-| Kendall's tau | > 0.70 mean |
-| Outlier benefit | ≥ 20% distortion reduction |
-| Score persistence | bit-exact after round-trip |
+| Metric                  | Value                      |
+| ----------------------- | -------------------------- |
+| Distortion (MSE/signal) | < 0.35 at s=2d             |
+| Top-10 recall           | ≥ 0.55 mean                |
+| Kendall's tau           | > 0.70 mean                |
+| Outlier benefit         | ≥ 20% distortion reduction |
+| Score persistence       | bit-exact after round-trip |
 
 Quality improves with larger sketch_dim.
 
 ## Documentation
 
-| Document | What it covers |
-|----------|----------------|
-| [docs/study.md](docs/study.md) | TurboQuant algorithm overview |
-| [docs/design/algorithms.md](docs/design/algorithms.md) | 7 algorithms with pseudocode |
-| [docs/design/persistence.md](docs/design/persistence.md) | Two-store file format |
-| [docs/design/store.md](docs/design/store.md) | Store API and lifecycle |
-| [docs/design/benchmarks.md](docs/design/benchmarks.md) | Benchmark suite and results |
-| [docs/design/testing.md](docs/design/testing.md) | Test strategy |
-| [docs/roadmap.md](docs/roadmap.md) | Development roadmap |
+| Document                                                 | What it covers                |
+| -------------------------------------------------------- | ----------------------------- |
+| [docs/study.md](docs/study.md)                           | TurboQuant algorithm overview |
+| [docs/design/algorithms.md](docs/design/algorithms.md)   | 7 algorithms with pseudocode  |
+| [docs/design/persistence.md](docs/design/persistence.md) | Two-store file format         |
+| [docs/design/store.md](docs/design/store.md)             | Store API and lifecycle       |
+| [docs/design/benchmarks.md](docs/design/benchmarks.md)   | Benchmark suite and results   |
+| [docs/design/testing.md](docs/design/testing.md)         | Test strategy                 |
+| [docs/roadmap.md](docs/roadmap.md)                       | Development roadmap           |
 
 ## Building
 
