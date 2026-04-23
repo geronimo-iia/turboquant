@@ -1,329 +1,299 @@
-# TurboQuant — Algorithms for Rust Implementation
+# TurboQuant — Algorithms
 
-Reference: `amirzandieh/QJL` (Python/CUDA), paper arXiv:2504.19874
+Reference: `amirzandieh/QJL` (Python/CUDA), paper arXiv:2504.19874.
+Verified against `qjl_score_kernel.cu` and `qjl_quant_kernel.cu`.
 
-## Architecture Overview
+## Architecture
 
 ```
-                    ┌─────────────────────────────┐
-                    │  turboquant (Rust crate)     │
-                    │                              │
-                    │  ┌───────────────────────┐   │
-                    │  │ QJLSketch             │   │
-                    │  │  - proj_dir: [d, s]   │   │
-                    │  │  - quantize()         │   │
-                    │  │  - score()            │   │
-                    │  └───────────────────────┘   │
-                    │  ┌───────────────────────┐   │
-                    │  │ KeyQuantizer          │   │
-                    │  │  - build_sketch()     │   │
-                    │  │  - update_sketch()    │   │
-                    │  │  - attention_score()  │   │
-                    │  └───────────────────────┘   │
-                    │  ┌───────────────────────┐   │
-                    │  │ ValueQuantizer        │   │
-                    │  │  - quantize_pack()    │   │
-                    │  │  - dequant_matmul()   │   │
-                    │  └───────────────────────┘   │
-                    └─────────────────────────────┘
+src/
+├── sketch.rs       QJLSketch — projection matrix, quantize, score
+├── outliers.rs     detect_outliers — top-k norms per dimension
+├── quantize.rs     CompressedKeys — sign hashing, bit-packing
+├── score.rs        score — signed dot, outlier sketch subtraction
+├── values.rs       CompressedValues — min-max quantization, fused matmul
+└── quantizer.rs    KeyQuantizer — batch + streaming wrapper
 ```
 
-## Algorithm 1: Random Projection Matrix (QJLSketch init)
+## Algorithm 1: Random Projection Matrix
 
 Source: `QJLSketch.__init__` + `init_rot_dir` in `llama3_utils_qjl.py`
+Impl: `src/sketch.rs` → `QJLSketch::new`
 
-**Purpose:** Generate the random projection matrix S used for sign-based
-quantization. Orthogonalize it for better numerical properties.
+Generates an orthogonalized random projection matrix. The QR step
+ensures near-orthogonal rows, and the `√d` scaling makes the
+sign-based estimator's bias correction work correctly.
 
 ```
 Input:
-  d     = head dimension (e.g. 128)
-  s     = sketch dimension (number of random projections)
-  seed  = RNG seed for reproducibility
+  d    = head dimension (e.g. 128)
+  s    = sketch dimension, must be divisible by 8
+  seed = RNG seed
 
 Output:
-  proj_dir       : [d, s] f32  — raw random Gaussian matrix
-  proj_dir_score : [d, s] f16  — orthogonalized, scaled by √d
+  proj_dir_score : [d, s] f32  row-major — orthogonalized, scaled by √d
+  proj_dir_quant : [s, d] f32  row-major — transpose of proj_dir_score
 
 Algorithm:
-  1. proj_dir = randn(d, s, seed)           // Gaussian random
+  1. Generate Gaussian random matrix [d, s] (column-major for nalgebra)
   2. num_chunks = ceil(s / d)
-  3. for i in 0..num_chunks:
-       chunk = proj_dir[:, i*d .. (i+1)*d]  // [d, d] or smaller
-       Q, _ = qr(chunk)                     // QR decomposition
-       proj_dir_score[:, i*d .. (i+1)*d] = Q * sqrt(d)
-  4. proj_dir_quant = transpose(proj_dir_score)  // [s, d]
+  3. For each chunk of d columns:
+       Q, R = qr(chunk)
+       chunk = Q * sqrt(d)
+  4. Convert to row-major [d, s] → proj_dir_score
+  5. proj_dir_quant = transpose(proj_dir_score)
 ```
 
-**Rust crates needed:** `ndarray` or raw `Vec<f32>`, `rand` + `rand_distr::Normal`,
-QR decomposition from `nalgebra` or `faer`.
+Both matrices are stored as `Vec<f32>` in row-major order. The
+projection `proj_dir_quant @ v` is equivalent to `v @ proj_dir_score`.
 
 ## Algorithm 2: QJL Quantization (sign-based hashing)
 
-Source: `QJLSketch.quantize` → CUDA kernel `quantize_with_outliers_kernel`
+Source: `quantize_with_outliers_kernel` in `qjl_quant_kernel.cu`
+Impl: `src/quantize.rs` → `QJLSketch::quantize`
 
-**Purpose:** Compress key vectors into sign bits. Separate outlier
-dimensions for higher-fidelity treatment.
-
-```
-Input:
-  key_states      : [batch, heads, groups, group_size, d] f32
-  outlier_indices : [batch, heads, groups, outlier_count] u8
-  proj_dir_quant  : [s, d] f16
-  outlier_sketch_dim : int
-
-Output:
-  key_quant         : [batch, heads, groups, group_size, s/8] u8  — packed sign bits (inliers)
-  key_outlier_quant : [batch, heads, groups, group_size, outlier_sketch_dim/8] u8  — packed sign bits (outliers)
-  outlier_norms     : [batch, heads, groups, group_size] f32  — L2 norm of outlier dims
-
-Algorithm:
-  for each vector x in key_states[b, h, g, :, :]:
-    1. Split x into inlier and outlier components:
-         outlier_mask[i] = 1 if i in outlier_indices[b,h,g] else 0
-         x_inlier  = x * (1 - outlier_mask)
-         x_outlier = x * outlier_mask
-
-    2. Project both:
-         sketch_inlier  = proj_dir_quant @ x_inlier    // [s]
-         sketch_outlier = proj_dir_quant @ x_outlier    // [outlier_sketch_dim]
-
-    3. Extract signs and bit-pack:
-         for each group of 8 projections:
-           byte = 0
-           for bit in 0..8:
-             if sketch_inlier[group*8 + bit] > 0:
-               byte |= (1 << bit)
-           key_quant[...] = byte
-
-         // Same for outlier sketch
-
-    4. outlier_norms = sqrt(sum(x_outlier^2))
-```
-
-**Key insight:** The sign of the random projection preserves inner product
-direction (Johnson-Lindenstrauss). Bit-packing 8 signs into 1 byte gives
-8x compression on the sign bits themselves.
-
-## Algorithm 3: QJL Score Computation (attention scores from compressed keys)
-
-Source: `QJLSketch.calc_score` → CUDA kernel `qjl_gqa_score_kernel`
-
-**Purpose:** Compute approximate Q·K^T attention scores directly from
-compressed sign bits, without decompressing K.
+Compresses key vectors into packed sign bits. Outlier and inlier
+dimensions are projected separately through the same matrix but
+stored in separate bit arrays.
 
 ```
 Input:
-  query_states      : [batch, heads, 1, d] f32
-  key_quant         : [batch, heads, groups, group_size, s/8] u8
-  key_outlier_quant : [batch, heads, groups, group_size, outlier_s/8] u8
-  key_norms         : [batch, heads, groups, group_size] f32
-  outlier_norms     : [batch, heads, groups, group_size] f32
-  outlier_indices   : [batch, heads, groups, outlier_count] u8
-  proj_dir_score    : [d, s] f16
+  keys            : [num_vectors, d] f32  flattened row-major
+  outlier_indices : [outlier_count] u8
+  proj_dir_quant  : [s, d] f32
 
 Output:
-  scores : [batch, heads, 1, total_seq_len] f32
+  key_quant         : [num_vectors, s/8] u8    — inlier sign bits
+  key_outlier_quant : [num_vectors, os/8] u8   — outlier sign bits
+  key_norms         : [num_vectors] f32        — full vector L2 norm
+  outlier_norms     : [num_vectors] f32        — outlier component L2 norm
 
 Algorithm:
-  1. Sketch the query:
-       sketched_q = query @ proj_dir_score    // [batch, heads, 1, s]
+  outlier_mask[i] = true if i in outlier_indices
 
-  2. For each compressed key vector:
-       // Unpack sign bits from key_quant
-       // Count matching signs between sketched_q and key_quant
-       // This is a Hamming distance computation:
-
-       sign_match_count = popcount(~(sign_bits_q XOR sign_bits_k))
-       // where sign_bits_q = pack(sketched_q > 0)
-
-       cos_estimate = cos(π * hamming_distance / sketch_dim)
-
-       score_inlier = ||q|| * ||k_inlier|| * cos_estimate
-
-  3. Same for outlier component, then:
-       score = score_inlier + score_outlier
+  For each vector x:
+    1. key_norms = ||x||
+    2. outlier_norms = sqrt(Σ x[i]² for i in outlier_indices)
+    3. For each projection p in 0..s:
+         dot_inlier  = Σ proj_dir_quant[p, i] * x[i]  where !outlier_mask[i]
+         dot_outlier = Σ proj_dir_quant[p, i] * x[i]  where  outlier_mask[i]
+    4. Pack sign(dot_inlier) into key_quant, 8 bits per byte
+    5. Pack sign(dot_outlier) into key_outlier_quant (first os projections)
 ```
 
-**Key insight:** The score computation is a Hamming distance on packed
-bytes — extremely fast with `popcount` intrinsics. No float decompression
-needed.
+Bit-packing: bit `i%8` of byte `i/8`. Bit set = positive projection.
+
+## Algorithm 3: Score Computation
+
+Source: `calc_score_kernel` in `qjl_score_kernel.cu`
+Impl: `src/score.rs` → `QJLSketch::score`
+
+Computes approximate `dot(query, key)` from compressed sign bits.
+This is the critical algorithm — verified against the CUDA kernel.
+
+```
+Input:
+  query             : [d] f32
+  compressed keys   : from Algorithm 2
+  proj_dir_score    : [d, s] f32  row-major
+  proj_dir_quant    : [s, d] f32  row-major
+
+Output:
+  scores : [num_vectors] f32
+
+Algorithm:
+  1. Full query sketch:
+       q_sketch = proj_dir_quant @ query                    → [s]
+
+  2. Outlier query sketch (only outlier dims of query projected):
+       q_outlier_sketch[p] = Σ query[j] * proj_dir_score[j, p]
+                             for j in outlier_indices        → [s]
+
+  3. Inlier query sketch:
+       q_inlier_sketch = q_sketch - q_outlier_sketch        → [s]
+
+  4. For each compressed key vector v:
+       dot_inlier  = Σ q_inlier_sketch[i]  * sign(key_quant[v, i])     for i in 0..s
+       dot_outlier = Σ q_outlier_sketch[i] * sign(key_outlier_quant[v, i])  for i in 0..os
+
+       inlier_norm = sqrt(key_norms[v]² - outlier_norms[v]²)
+
+       score = sqrt(π/2)/s  * inlier_norm       * dot_inlier
+             + sqrt(π/2)/os * outlier_norms[v]   * dot_outlier
+```
+
+The `signed_dot` function: for each bit position, if bit is set
+multiply by +1, else by -1. No Hamming distance, no cosine — the
+float query sketch values are used directly.
+
+**Scale factor: `sqrt(π/2) / sketch_dim`**
+
+This comes from the QJL unbiased estimator. The `sqrt(d)` scaling
+in the projection rows cancels between query and key (both projected
+through the same matrix). The `sqrt(π/2)` corrects the bias introduced
+by taking signs.
+
+**Outlier subtraction: `q_inlier = q_full - q_outlier`**
+
+The CUDA kernel computes `q_sketch_val = shared_q_sketch - shared_q_outliers_sketch`
+for the inlier inner product. This ensures the inlier score only
+reflects the inlier dimensions of both query and key.
 
 ## Algorithm 4: Outlier Detection
 
 Source: `QJLKeyQuantizer.build_sketch` in `llama3_utils_qjl.py`
-
-**Purpose:** Identify which dimensions are outliers within each group.
+Impl: `src/outliers.rs` → `detect_outliers`
 
 ```
 Input:
-  key_states    : [batch, heads, groups, group_size, d] f32
-  outlier_count : int (e.g. 7)
+  keys          : [group_size, d] f32  flattened row-major
+  outlier_count : usize
 
 Output:
-  outlier_indices : [batch, heads, groups, outlier_count] u8
+  outlier_indices : [outlier_count] u8  sorted ascending
 
 Algorithm:
-  for each group [b, h, g]:
-    1. norms = ||key_states[b,h,g,:,:]||  along group_size dim  // [d]
-       (L2 norm across the group_size vectors for each dimension)
-    2. outlier_indices = top_k(norms, outlier_count)
+  1. For each dimension i in 0..d:
+       dim_norm[i] = sqrt(Σ keys[t, i]² for t in 0..group_size)
+  2. outlier_indices = top_k(dim_norm, outlier_count)
+  3. Sort ascending
 ```
 
-## Algorithm 5: Value Quantization (min-max + bit-packing)
+The norm is computed across the group (not per-vector). Dimensions
+with high energy across the group are outliers.
+
+## Algorithm 5: Value Quantization
 
 Source: `triton_quantize_and_pack_along_last_dim` in `new_pack.py`
-
-**Purpose:** Quantize V matrices with simple min-max scalar quantization
-and pack into int32.
+Impl: `src/values.rs` → `quantize_values`
 
 ```
 Input:
-  value_states : [batch, heads, d, seq_len] f32
-  group_size   : int
-  bits         : int (2 or 4)
+  values     : [num_elements] f32
+  group_size : usize
+  bits       : 2 or 4
 
 Output:
-  packed : [batch, heads, d, seq_len / (32/bits)] i32
-  scale  : [batch, heads, d, num_groups] f32
-  mn     : [batch, heads, d, num_groups] f32
+  packed : [num_elements / feat_per_int] i32   where feat_per_int = 32/bits
+  scale  : [num_groups] f32
+  mn     : [num_groups] f32
 
 Algorithm:
-  num_groups = seq_len / group_size
-  feat_per_int = 32 / bits
-
-  for each group:
+  For each group:
     1. mn = min(group), mx = max(group)
     2. scale = (mx - mn) / (2^bits - 1)
-    3. quantized = round((value - mn) / scale)  // clamp to [0, 2^bits-1]
-    4. Pack `feat_per_int` quantized values into one i32:
-         packed = 0
-         for i in 0..feat_per_int:
-           packed |= quantized[i] << (i * bits)
+    3. quantized[i] = round((value[i] - mn) / scale), clamped to [0, 2^bits-1]
+  Pack feat_per_int values per i32:
+    packed[i/fpi] |= quantized[i] << ((i % fpi) * bits)
 ```
 
-## Algorithm 6: Quantized Value MatMul
+## Algorithm 6: Fused Dequant + Dot Product
 
 Source: `cuda_quantized_bmm_dynamic` in `matmul.py`
-
-**Purpose:** Compute attention_weights @ V without fully decompressing V.
+Impl: `src/values.rs` → `quantized_dot`
 
 ```
 Input:
-  attn_weights : [batch, heads, 1, seq_len] f32
-  packed_v     : [batch, heads, seq_len/(32/bits), d] i32
-  scale        : [batch, heads, num_groups, d] f32
-  mn           : [batch, heads, num_groups, d] f32
-  bits         : int
+  weights    : [num_elements] f32
+  compressed : CompressedValues
 
 Output:
-  result : [batch, heads, 1, d] f32
+  scalar f32
 
 Algorithm:
-  Fused dequant + matmul:
-  for each output dimension j:
-    acc = 0
-    for each group g:
-      for each element i in group:
-        // Extract quantized value from packed int
-        shift = (i % feat_per_int) * bits
-        mask = (1 << bits) - 1
-        q_val = (packed[...] >> shift) & mask
-        // Dequantize
-        float_val = q_val * scale[g, j] + mn[g, j]
-        // Accumulate
-        acc += attn_weights[..., g*group_size + i] * float_val
-    result[j] = acc
+  acc = 0
+  For each element i:
+    q_val = (packed[i/fpi] >> ((i%fpi) * bits)) & mask
+    float_val = q_val * scale[i/group_size] + mn[i/group_size]
+    acc += weights[i] * float_val
 ```
 
-## Algorithm 7: Streaming Update (online quantization)
+## Algorithm 7: Streaming Quantizer
 
 Source: `QJLKeyQuantizer.update_sketch` in `llama3_utils_qjl.py`
-
-**Purpose:** Append new key vectors to the compressed store one at a time
-(for autoregressive decoding or streaming ingest).
+Impl: `src/quantizer.rs` → `KeyQuantizer`
 
 ```
-Input:
-  new_key : [batch, heads, 1, d] f32
-
 State:
-  residual_buffer : accumulates until buffer_size is reached
-  key_quant, key_outlier_quant, key_norms, outlier_norms, outlier_indices
+  groups   : Vec<CompressedKeys>   — compressed groups so far
+  residual : Vec<f32>              — uncompressed tail (< buffer_size vectors)
+  seq_len  : usize
 
-Algorithm:
-  1. Append new_key to residual_buffer
-  2. If len(residual_buffer) < buffer_size: return (not enough to quantize)
-  3. Reshape buffer into groups of group_size
-  4. Detect outliers (Algorithm 4)
-  5. Quantize (Algorithm 2)
-  6. Compute norms
-  7. Concatenate with existing compressed state
-  8. Clear residual_buffer
+build_sketch(keys, num_vectors):
+  Split into groups of group_size. Compress each group (Algorithms 4+2).
+  Remainder goes to residual.
+
+update(key):
+  Append to residual. If residual reaches buffer_size:
+    Split into groups, compress, append to groups, clear residual.
+
+attention_score(query):
+  For compressed groups: use Algorithm 3 (approximate scores).
+  For residual vectors: exact dot product (not yet compressed).
+  Concatenate and return.
 ```
 
-## Data Structures Summary
+## Data Structures (as implemented)
 
 ```rust
-struct QJLSketch {
-    dim: (usize, usize),          // (head_dim, sketch_dim)
-    outlier_sketch_dim: usize,
-    proj_dir_quant: Vec<f32>,     // [sketch_dim, head_dim] row-major
-    proj_dir_score: Vec<f32>,     // [head_dim, sketch_dim] row-major
+// src/sketch.rs
+pub struct QJLSketch {
+    pub head_dim: usize,
+    pub sketch_dim: usize,
+    pub outlier_sketch_dim: usize,
+    pub proj_dir_score: Vec<f32>,     // [head_dim, sketch_dim] row-major
+    pub proj_dir_quant: Vec<f32>,     // [sketch_dim, head_dim] row-major
 }
 
-struct CompressedKeys {
-    key_quant: Vec<u8>,           // packed sign bits (inliers)
-    key_outlier_quant: Vec<u8>,   // packed sign bits (outliers)
-    key_norms: Vec<f32>,          // per-vector L2 norms
-    outlier_norms: Vec<f32>,      // per-vector outlier L2 norms
-    outlier_indices: Vec<u8>,     // per-group outlier dim indices
-    residual: Option<Vec<f32>>,   // un-quantized tail (< buffer_size)
-    seq_len: usize,
+// src/quantize.rs
+pub struct CompressedKeys {
+    pub key_quant: Vec<u8>,           // [num_vectors, sketch_dim/8]
+    pub key_outlier_quant: Vec<u8>,   // [num_vectors, outlier_sketch_dim/8]
+    pub key_norms: Vec<f32>,          // [num_vectors]
+    pub outlier_norms: Vec<f32>,      // [num_vectors]
+    pub outlier_indices: Vec<u8>,     // [outlier_count] per group
+    pub num_vectors: usize,
+    pub head_dim: usize,
 }
 
-struct CompressedValues {
-    packed: Vec<i32>,             // bit-packed quantized values
-    scale: Vec<f32>,              // per-group scale
-    mn: Vec<f32>,                 // per-group minimum
-    full_tail: Vec<f32>,          // un-quantized tail (< buffer_size)
-    bits: u8,                     // 2 or 4
-    group_size: usize,
+// src/values.rs
+pub struct CompressedValues {
+    pub packed: Vec<i32>,             // bit-packed quantized values
+    pub scale: Vec<f32>,              // [num_groups]
+    pub mn: Vec<f32>,                 // [num_groups]
+    pub num_elements: usize,
+    pub bits: u8,                     // 2 or 4
+    pub group_size: usize,
 }
 ```
 
-## Rust Implementation Plan
+## Quality Characteristics (measured)
 
-### Phase 1 — CPU-only, f32, no SIMD
+Tested with random Gaussian vectors, d=64–128, s=64–512.
 
-1. `QJLSketch::new(head_dim, sketch_dim, seed)` — Algorithms 1
-2. `QJLSketch::quantize(keys, outlier_indices)` — Algorithm 2 (loop-based)
-3. `QJLSketch::score(query, compressed_keys)` — Algorithm 3 (popcount via `u8::count_ones()`)
-4. `detect_outliers(keys, count)` — Algorithm 4
-5. `quantize_values(values, group_size, bits)` — Algorithm 5
-6. `quantized_matmul(weights, compressed_values)` — Algorithm 6
-7. `KeyQuantizer` with streaming update — Algorithm 7
+| Metric | Value | Conditions |
+|--------|-------|------------|
+| Distortion (MSE/signal) | < 0.35 | s = 2d |
+| Distortion monotonicity | d > 2d > 4d | confirmed |
+| Top-10 recall | ≥ 0.55 mean | 200 keys, s = 4d, 100 trials |
+| Kendall's tau | > 0.70 mean | 100 keys, s = 4d, 50 trials |
+| Outlier benefit | ≥ 20% distortion reduction | 10x outlier magnitude |
+| Value 4-bit relative error | < 0.20 mean | random Gaussian |
+| Value 2-bit relative error | < 1.0 mean | random Gaussian |
 
-### Phase 2 — SIMD + performance
+Quality improves with larger sketch_dim. At s = 8d (the paper's
+recommended setting), distortion drops significantly and ranking
+preservation approaches exact.
 
-- Use `std::arch` for `_mm256_popcnt_epi8` (AVX-512 VPOPCNT) or
-  `popcnt` on u64 chunks
-- Batch the projection as a GEMM via `ndarray` + BLAS
-- Parallelize with `rayon` for multi-head processing
-
-### Phase 3 — GPU (optional)
-
-- Port CUDA kernels to `wgpu` compute shaders or use `cudarc` for
-  direct CUDA FFI
-- The CUDA kernels in `QJL/qjl_kernel/csrc/` are the reference
-
-## Crate Dependencies
+## Dependencies
 
 ```toml
-[dependencies]
-ndarray = "0.16"           # matrix ops
-nalgebra = "0.33"          # QR decomposition
-rand = "0.8"               # RNG
-rand_distr = "0.4"         # Normal distribution
-rayon = "1.10"             # parallelism
+nalgebra = "0.33"       # QR decomposition
+rand = "0.8"            # RNG
+rand_chacha = "0.3"     # deterministic seeded RNG
+rand_distr = "0.4"      # Normal distribution
+bytemuck = "1.16"       # zero-copy casts
+rayon = "1.10"          # parallelism (Phase 5)
+memmap2 = "0.9"         # persistence (Phase 3)
+blake3 = "1.5"          # content hashing (Phase 3)
 ```
