@@ -130,25 +130,29 @@ Keys and values in separate files with independent indexes.
 
 ### 3a — Index format + sketch reconstruction
 
-- [ ] `src/store/config.rs`: index header read/write (sketch params
-      in keys.idx, value params in values.idx)
-- [ ] Reconstruct `QJLSketch` from header params (deterministic seed)
-- [ ] Tests: write header, read back, sketch produces same scores
+- [x] `src/store/config.rs`: `KeysConfig`, `ValuesConfig`, `IndexEntry`, `IndexMeta`
+- [x] Binary read/write for all config structs (little-endian)
+- [x] Magic bytes + version validation on read
+- [x] Reconstruct `QJLSketch` from `KeysConfig` (deterministic seed)
+- [x] Tests: round-trip for all structs, sketch reconstruction, bad magic rejected (6 tests)
 
 ### 3b — Key store
 
-- [ ] `src/store/kv.rs`: `KeyStore` struct
-- [ ] `KeyStore::create(dir, sketch_params)` — create empty keys.bin + keys.idx
-- [ ] `KeyStore::open(dir)` — read keys.idx header, construct QJLSketch,
+- [x] `src/store/key_store.rs`: `KeyStore` struct
+- [x] `KeyStore::create(dir, config)` — create empty keys.bin + keys.idx
+- [x] `KeyStore::open(dir)` — read keys.idx header, construct QJLSketch,
       mmap keys.bin, load index
-- [ ] `append(slug_hash, content_hash, compressed_keys)` — serialize
-      entry, pwrite at EOF, fsync, atomic index rewrite
-- [ ] `get_page(slug_hash) → Option<KeyPageView>` — binary search,
+- [x] `append(slug_hash, content_hash, compressed_keys)` — serialize
+      entry, append to keys.bin, fsync, atomic index rewrite
+- [x] `get_page(slug_hash) → Option<KeyPageView>` — binary search,
       zero-copy slice into mmap
-- [ ] `KeyPageView` — accessors for key_quant, key_norms,
-      outlier_norms, outlier_indices via bytemuck
-- [ ] Tests: write-read round-trip, score survives persistence,
-      multiple pages, page not found returns None
+- [x] `KeyPageView` — accessors for key_quant, key_norms,
+      outlier_norms, outlier_indices (unaligned f32 read)
+- [x] `to_compressed_keys()` — reconstruct `CompressedKeys` from view
+- [x] `is_fresh(slug_hash, content_hash)` — staleness check
+- [x] Update with higher generation, dead space tracking
+- [x] Tests: create/open, append/get, page not found, score survives
+      persistence, multiple pages, reopen, staleness, update overwrites (8 tests)
 
 ### 3c — Value store
 
