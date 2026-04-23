@@ -11,13 +11,28 @@ persist, reload, score, verify ranking preservation.
 
 Set up the crate, CI, and test harness.
 
-- [ ] `cargo init --lib turboquant` in `projects/turboquant/`
-- [ ] Cargo.toml: edition 2021, rust-version 1.85, MIT OR Apache-2.0
-- [ ] Dependencies: `nalgebra`, `rand`, `rand_distr`, `bytemuck`, `rayon`
-- [ ] Dev-dependencies: `tempfile`, `approx`
-- [ ] `src/lib.rs` with empty module declarations
-- [ ] `.github/workflows/ci.yml` — cargo fmt, clippy, test
-- [ ] `tests/` directory structure matching `testing.md`
+- [x] `cargo init --lib turboquant` in `projects/turboquant/`
+- [x] Cargo.toml: edition 2021, rust-version 1.95, MIT OR Apache-2.0
+- [x] Dependencies: `nalgebra`, `rand`, `rand_distr`, `bytemuck`, `rayon`, `memmap2`, `blake3`
+- [x] Dev-dependencies: `tempfile`, `approx`
+- [x] `src/lib.rs` with empty module declarations
+- [x] `.github/workflows/ci.yml` — cargo fmt, clippy, test, audit
+- [x] `.github/workflows/release.yml` — test + publish to crates.io
+- [x] `.github/workflows/dependabot.yml` — auto-merge patch/minor
+- [x] `.github/dependabot.yml` — cargo + github-actions weekly
+- [x] `.github/ISSUE_TEMPLATE/` — bug report, feature request, config
+- [x] `.github/pull_request_template.md`
+- [x] `rust-toolchain.toml` — pinned to 1.95
+- [x] `rustfmt.toml`, `clippy.toml`, `audit.toml`
+- [x] `.tool-versions` — rust 1.95.0
+- [x] `LICENSE-MIT`, `LICENSE-APACHE`
+- [x] `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `README.md`
+- [x] `docs/` — README, roadmap, release guide
+- [x] `docs/study/` — article, overview
+- [x] `docs/design/` — algorithms, pipeline, persistence, testing
+- [x] `tests/` directory structure matching `design/testing.md`
+- [x] `cargo build` — clean
+- [x] `cargo test` — passes (zero tests)
 - [ ] Generate Python reference fixtures (`tests/fixtures/reference/`)
       from `external/QJL` with pinned seed=42
 
