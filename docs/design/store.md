@@ -140,14 +140,15 @@ key_store.is_empty()
 
 ## Error Handling
 
-All store operations return `io::Result`. Errors come from:
+All store operations return `qjl_sketch::error::Result`. Errors are
+represented by `QjlError`:
 
 | Operation | Possible errors |
 |-----------|-----------------|
-| `create` | Directory creation, file write |
-| `open` | File not found, bad magic, corrupt index |
-| `append` | Disk full, fsync failure |
-| `compact` | Disk full (needs space for new file) |
+| `create` | `Io` (directory creation, file write) |
+| `open` | `Io` (file not found), `StoreMagicMismatch`, `StoreVersionMismatch` |
+| `append` | `Io` (disk full, fsync failure) |
+| `compact` | `Io` (disk full for new file) |
 
 The stores never panic. A corrupt `.bin` file is truncated to the
 last valid entry on open. A corrupt `.idx` triggers index rebuild

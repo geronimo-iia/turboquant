@@ -1,16 +1,27 @@
+use crate::error::{QjlError, Result};
+
 /// Detect outlier dimensions within a group of vectors.
-///
-/// For each dimension, computes the L2 norm across all vectors in the group.
-/// Returns the indices of the top-k dimensions with the highest norms.
-///
-/// - `keys`: flattened [group_size, head_dim] row-major
-/// - `group_size`: number of vectors in the group
-/// - `head_dim`: dimension of each vector
-/// - `count`: number of outlier dimensions to select
-pub fn detect_outliers(keys: &[f32], group_size: usize, head_dim: usize, count: usize) -> Vec<u8> {
-    assert_eq!(keys.len(), group_size * head_dim);
-    assert!(count <= head_dim);
-    assert!(head_dim <= 256, "head_dim must fit in u8");
+pub fn detect_outliers(
+    keys: &[f32],
+    group_size: usize,
+    head_dim: usize,
+    count: usize,
+) -> Result<Vec<u8>> {
+    if keys.len() != group_size * head_dim {
+        return Err(QjlError::DimensionMismatch {
+            expected: group_size * head_dim,
+            got: keys.len(),
+        });
+    }
+    if count > head_dim {
+        return Err(QjlError::DimensionMismatch {
+            expected: head_dim,
+            got: count,
+        });
+    }
+    if head_dim > 256 {
+        return Err(QjlError::InvalidSketchDim(head_dim));
+    }
 
     // L2 norm per dimension across the group
     let mut dim_norms = vec![0.0f32; head_dim];
@@ -33,7 +44,7 @@ pub fn detect_outliers(keys: &[f32], group_size: usize, head_dim: usize, count: 
     });
     indices.truncate(count);
     indices.sort_unstable();
-    indices
+    Ok(indices)
 }
 
 /// Build an outlier mask from indices. mask[i] = true if i is an outlier.
@@ -58,7 +69,7 @@ mod tests {
         for t in 0..group_size {
             keys[t * head_dim + 2] = 100.0;
         }
-        let indices = detect_outliers(&keys, group_size, head_dim, 1);
+        let indices = detect_outliers(&keys, group_size, head_dim, 1).unwrap();
         assert_eq!(indices, vec![2]);
     }
 
@@ -67,7 +78,7 @@ mod tests {
         let head_dim = 8;
         let group_size = 4;
         let keys = vec![1.0f32; group_size * head_dim];
-        let indices = detect_outliers(&keys, group_size, head_dim, 3);
+        let indices = detect_outliers(&keys, group_size, head_dim, 3).unwrap();
         assert_eq!(indices.len(), 3);
     }
 
@@ -81,7 +92,7 @@ mod tests {
             keys[t * head_dim + 1] = 50.0;
             keys[t * head_dim + 3] = 80.0;
         }
-        let indices = detect_outliers(&keys, group_size, head_dim, 2);
+        let indices = detect_outliers(&keys, group_size, head_dim, 2).unwrap();
         assert!(indices.contains(&1));
         assert!(indices.contains(&3));
     }
@@ -90,5 +101,17 @@ mod tests {
     fn test_outlier_mask() {
         let mask = outlier_mask(&[1, 3], 5);
         assert_eq!(mask, vec![false, true, false, true, false]);
+    }
+
+    #[test]
+    fn test_outlier_dimension_mismatch() {
+        let keys = vec![1.0f32; 10];
+        assert!(detect_outliers(&keys, 4, 3, 1).is_err());
+    }
+
+    #[test]
+    fn test_outlier_count_exceeds_dim() {
+        let keys = vec![1.0f32; 16];
+        assert!(detect_outliers(&keys, 4, 4, 5).is_err());
     }
 }

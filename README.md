@@ -30,14 +30,14 @@ use qjl_sketch::sketch::QJLSketch;
 use qjl_sketch::outliers::detect_outliers;
 
 // Create a sketch (deterministic from seed)
-let sketch = QJLSketch::new(128, 256, 64, 42);
+let sketch = QJLSketch::new(128, 256, 64, 42)?;
 
 // Compress key vectors
-let outlier_indices = detect_outliers(&keys, group_size, 128, 4);
-let compressed = sketch.quantize(&keys, num_vectors, &outlier_indices);
+let outlier_indices = detect_outliers(&keys, group_size, 128, 4)?;
+let compressed = sketch.quantize(&keys, num_vectors, &outlier_indices)?;
 
 // Score a query against compressed keys
-let scores = sketch.score(&query, &compressed);
+let scores = sketch.score(&query, &compressed)?;
 ```
 
 ### Persistence
@@ -57,7 +57,7 @@ store.append(slug_hash, content_hash, &compressed)?;
 let store = KeyStore::open(dir)?;
 let page = store.get_page(slug_hash).unwrap();
 let reloaded = page.to_compressed_keys(128);
-let scores = store.config.build_sketch().score(&query, &reloaded);
+let scores = store.config.build_sketch().score(&query, &reloaded)?;
 ```
 
 ## Performance
@@ -104,7 +104,7 @@ Quality improves with larger sketch_dim.
 
 ```bash
 cargo build                      # debug
-cargo test                       # 75 tests (~8s)
+cargo test                       # 93 tests (~8s)
 cargo bench                      # criterion benchmarks (release)
 cargo clippy -- -D warnings      # lint
 ```

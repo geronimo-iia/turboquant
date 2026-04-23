@@ -19,14 +19,14 @@ fn random_vec(d: usize, rng: &mut ChaCha20Rng) -> Vec<f32> {
 fn bench_key_quantize(c: &mut Criterion) {
     let d = 128;
     let s = 256;
-    let sketch = QJLSketch::new(d, s, 64, 42);
+    let sketch = QJLSketch::new(d, s, 64, 42).unwrap();
     let mut rng = ChaCha20Rng::seed_from_u64(100);
 
     let mut group = c.benchmark_group("key_quantize");
 
     for num_vectors in [32, 128, 512] {
         let keys = random_vec(num_vectors * d, &mut rng);
-        let outlier_indices = detect_outliers(&keys, num_vectors, d, 4);
+        let outlier_indices = detect_outliers(&keys, num_vectors, d, 4).unwrap();
 
         group.bench_with_input(
             BenchmarkId::new("vectors", num_vectors),
@@ -74,7 +74,9 @@ fn bench_sketch_creation(c: &mut Criterion) {
             BenchmarkId::new("dim", format!("{d}x{s}")),
             &(d, s),
             |b, &(d, s)| {
-                b.iter(|| QJLSketch::new(black_box(d), black_box(s), black_box(s / 4), 42));
+                b.iter(|| {
+                    QJLSketch::new(black_box(d), black_box(s), black_box(s / 4), 42).unwrap()
+                });
             },
         );
     }

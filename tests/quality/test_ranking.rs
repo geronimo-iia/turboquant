@@ -10,7 +10,7 @@ fn test_top_k_recall() {
     let num_keys = 200;
     let k = 10;
     let num_trials = 100;
-    let sketch = QJLSketch::new(d, s, s, 42);
+    let sketch = QJLSketch::new(d, s, s, 42).unwrap();
 
     let mut recall_sum = 0.0f32;
 
@@ -29,8 +29,8 @@ fn test_top_k_recall() {
 
         // Compressed scores
         let outlier_indices = vec![0u8];
-        let compressed = sketch.quantize(&keys, num_keys, &outlier_indices);
-        let approx_scores = sketch.score(&q, &compressed);
+        let compressed = sketch.quantize(&keys, num_keys, &outlier_indices).unwrap();
+        let approx_scores = sketch.score(&q, &compressed).unwrap();
         let approx_top = top_k_indices(&approx_scores, k);
 
         recall_sum += recall(&exact_top, &approx_top);
@@ -49,7 +49,7 @@ fn test_kendall_tau() {
     let s = 256;
     let num_keys = 100;
     let num_trials = 50;
-    let sketch = QJLSketch::new(d, s, s, 42);
+    let sketch = QJLSketch::new(d, s, s, 42).unwrap();
 
     let mut tau_sum = 0.0f32;
 
@@ -66,8 +66,8 @@ fn test_kendall_tau() {
         let exact_ranking = argsort_desc(&exact_scores);
 
         let outlier_indices = vec![0u8];
-        let compressed = sketch.quantize(&keys, num_keys, &outlier_indices);
-        let approx_scores = sketch.score(&q, &compressed);
+        let compressed = sketch.quantize(&keys, num_keys, &outlier_indices).unwrap();
+        let approx_scores = sketch.score(&q, &compressed).unwrap();
         let approx_ranking = argsort_desc(&approx_scores);
 
         tau_sum += kendall_tau(&exact_ranking, &approx_ranking);

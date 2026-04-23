@@ -3,6 +3,8 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use rand_distr::{Distribution, StandardNormal};
 
+use crate::error::{QjlError, Result};
+
 /// Random projection sketch for QJL quantization.
 ///
 /// Generates an orthogonalized random projection matrix used for
@@ -27,19 +29,27 @@ impl QJLSketch {
     /// - `sketch_dim`: number of random projections (s), must be divisible by 8
     /// - `outlier_sketch_dim`: sketch dimension for outlier components, must be divisible by 8
     /// - `seed`: RNG seed for reproducibility
-    pub fn new(head_dim: usize, sketch_dim: usize, outlier_sketch_dim: usize, seed: u64) -> Self {
-        assert!(
-            sketch_dim.is_multiple_of(8),
-            "sketch_dim must be divisible by 8"
-        );
-        assert!(
-            outlier_sketch_dim.is_multiple_of(8),
-            "outlier_sketch_dim must be divisible by 8"
-        );
-        assert!(
-            outlier_sketch_dim <= sketch_dim,
-            "outlier_sketch_dim must be <= sketch_dim"
-        );
+    pub fn new(
+        head_dim: usize,
+        sketch_dim: usize,
+        outlier_sketch_dim: usize,
+        seed: u64,
+    ) -> Result<Self> {
+        if head_dim == 0 {
+            return Err(QjlError::DimensionMismatch {
+                expected: 1,
+                got: 0,
+            });
+        }
+        if sketch_dim == 0 || !sketch_dim.is_multiple_of(8) {
+            return Err(QjlError::InvalidSketchDim(sketch_dim));
+        }
+        if !outlier_sketch_dim.is_multiple_of(8) {
+            return Err(QjlError::InvalidSketchDim(outlier_sketch_dim));
+        }
+        if outlier_sketch_dim > sketch_dim {
+            return Err(QjlError::InvalidSketchDim(outlier_sketch_dim));
+        }
 
         let mut rng = ChaCha20Rng::seed_from_u64(seed);
         let proj_dir_score = init_orthogonal_projection(head_dim, sketch_dim, &mut rng);
@@ -47,13 +57,13 @@ impl QJLSketch {
         // proj_dir_quant is the transpose: [sketch_dim, head_dim]
         let proj_dir_quant = transpose(&proj_dir_score, head_dim, sketch_dim);
 
-        Self {
+        Ok(Self {
             head_dim,
             sketch_dim,
             outlier_sketch_dim,
             proj_dir_score,
             proj_dir_quant,
-        }
+        })
     }
 }
 
@@ -141,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_proj_dimensions() {
-        let sketch = QJLSketch::new(128, 256, 64, 42);
+        let sketch = QJLSketch::new(128, 256, 64, 42).unwrap();
         assert_eq!(sketch.proj_dir_score.len(), 128 * 256);
         assert_eq!(sketch.proj_dir_quant.len(), 256 * 128);
         assert_eq!(sketch.head_dim, 128);
@@ -153,7 +163,7 @@ mod tests {
     fn test_proj_orthogonality() {
         let d = 64;
         let s = 128;
-        let sketch = QJLSketch::new(d, s, 32, 42);
+        let sketch = QJLSketch::new(d, s, 32, 42).unwrap();
 
         // First d×d chunk should be approximately orthogonal:
         // Q^T Q ≈ d * I  (because we scaled by sqrt(d))
@@ -182,17 +192,32 @@ mod tests {
 
     #[test]
     fn test_proj_deterministic() {
-        let a = QJLSketch::new(64, 128, 32, 42);
-        let b = QJLSketch::new(64, 128, 32, 42);
+        let a = QJLSketch::new(64, 128, 32, 42).unwrap();
+        let b = QJLSketch::new(64, 128, 32, 42).unwrap();
         assert_eq!(a.proj_dir_score, b.proj_dir_score);
         assert_eq!(a.proj_dir_quant, b.proj_dir_quant);
     }
 
     #[test]
     fn test_proj_different_seeds() {
-        let a = QJLSketch::new(64, 128, 32, 42);
-        let b = QJLSketch::new(64, 128, 32, 99);
+        let a = QJLSketch::new(64, 128, 32, 42).unwrap();
+        let b = QJLSketch::new(64, 128, 32, 99).unwrap();
         assert_ne!(a.proj_dir_score, b.proj_dir_score);
+    }
+
+    #[test]
+    fn test_new_zero_head_dim() {
+        assert!(QJLSketch::new(0, 128, 32, 42).is_err());
+    }
+
+    #[test]
+    fn test_new_sketch_dim_not_divisible_by_8() {
+        assert!(QJLSketch::new(64, 100, 32, 42).is_err());
+    }
+
+    #[test]
+    fn test_new_outlier_dim_exceeds_sketch_dim() {
+        assert!(QJLSketch::new(64, 128, 256, 42).is_err());
     }
 
     #[test]

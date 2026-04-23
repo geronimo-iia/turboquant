@@ -20,8 +20,8 @@ fn measure_value_error(bits: u8, trials: usize, seed: u64) -> f64 {
             continue;
         }
 
-        let compressed = quantize_values(&values, group_size, bits);
-        let approx = quantized_dot(&weights, &compressed);
+        let compressed = quantize_values(&values, group_size, bits).unwrap();
+        let approx = quantized_dot(&weights, &compressed).unwrap();
 
         let rel_err = ((exact - approx) / exact).abs() as f64;
         relative_errors.push(rel_err);

@@ -7,7 +7,7 @@ use rand_chacha::ChaCha20Rng;
 fn test_rotation_preserves_norm() {
     let d = 128;
     let s = 256;
-    let sketch = QJLSketch::new(d, s, s, 42);
+    let sketch = QJLSketch::new(d, s, s, 42).unwrap();
     let mut rng = ChaCha20Rng::seed_from_u64(100);
 
     let trials = 1000;
@@ -39,7 +39,7 @@ fn test_rotation_preserves_norm() {
 fn test_rotation_preserves_inner_product() {
     let d = 128;
     let s = 256;
-    let sketch = QJLSketch::new(d, s, s, 42);
+    let sketch = QJLSketch::new(d, s, s, 42).unwrap();
     let mut rng = ChaCha20Rng::seed_from_u64(200);
 
     let trials = 1000;

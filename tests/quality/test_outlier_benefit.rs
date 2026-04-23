@@ -12,7 +12,7 @@ fn measure_distortion_with_outliers(
     trials: usize,
     seed: u64,
 ) -> f64 {
-    let sketch = QJLSketch::new(d, s, s, 42);
+    let sketch = QJLSketch::new(d, s, s, 42).unwrap();
     let mut rng = ChaCha20Rng::seed_from_u64(seed);
 
     let mut mse_sum = 0.0f64;
@@ -34,8 +34,8 @@ fn measure_distortion_with_outliers(
 
         let exact = dot(&q, &k) as f64;
 
-        let compressed = sketch.quantize(&k, 1, &outlier_indices);
-        let scores = sketch.score(&q, &compressed);
+        let compressed = sketch.quantize(&k, 1, &outlier_indices).unwrap();
+        let scores = sketch.score(&q, &compressed).unwrap();
         let approx = scores[0] as f64;
 
         mse_sum += (exact - approx).powi(2);

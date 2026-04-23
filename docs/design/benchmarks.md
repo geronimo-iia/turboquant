@@ -51,6 +51,13 @@ Persistence performance.
 Machine: Apple M-series, release build, criterion defaults.
 Parameters: d=128, s=256, os=64, 32 vectors/page.
 
+Measured on v0.1.0. The v0.2.0 `Result` migration adds no measurable
+overhead (validation checks are O(n) scans on inputs that are already
+being iterated).
+
+These are Phase 4 optimization targets — deferred until llm-wiki
+integration reveals real-world bottlenecks.
+
 ### Score
 
 | Benchmark | Time |

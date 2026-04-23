@@ -1,3 +1,4 @@
+use crate::error::{validate_finite, QjlError, Result};
 use crate::outliers::outlier_mask;
 use crate::sketch::{l2_norm, QJLSketch};
 
@@ -31,11 +32,25 @@ impl QJLSketch {
         keys: &[f32],
         num_vectors: usize,
         outlier_indices: &[u8],
-    ) -> CompressedKeys {
+    ) -> Result<CompressedKeys> {
         let d = self.head_dim;
         let s = self.sketch_dim;
         let os = self.outlier_sketch_dim;
-        assert_eq!(keys.len(), num_vectors * d);
+        if keys.len() != num_vectors * d {
+            return Err(QjlError::DimensionMismatch {
+                expected: num_vectors * d,
+                got: keys.len(),
+            });
+        }
+        validate_finite(keys, "quantize keys")?;
+        for &idx in outlier_indices {
+            if idx as usize >= d {
+                return Err(QjlError::OutlierIndexOutOfRange {
+                    index: idx,
+                    head_dim: d,
+                });
+            }
+        }
 
         let mask = outlier_mask(outlier_indices, d);
         let inlier_bytes = s / 8;
@@ -99,7 +114,7 @@ impl QJLSketch {
             }
         }
 
-        CompressedKeys {
+        Ok(CompressedKeys {
             key_quant,
             key_outlier_quant,
             key_norms,
@@ -107,7 +122,7 @@ impl QJLSketch {
             outlier_indices: outlier_indices.to_vec(),
             num_vectors,
             head_dim: d,
-        }
+        })
     }
 }
 
@@ -154,12 +169,14 @@ mod tests {
 
     #[test]
     fn test_quantize_output_shape() {
-        let sketch = QJLSketch::new(16, 32, 16, 42);
+        let sketch = QJLSketch::new(16, 32, 16, 42).unwrap();
         let num_vectors = 4;
         let keys = vec![1.0f32; num_vectors * 16];
         let outlier_indices = vec![0u8, 1];
 
-        let compressed = sketch.quantize(&keys, num_vectors, &outlier_indices);
+        let compressed = sketch
+            .quantize(&keys, num_vectors, &outlier_indices)
+            .unwrap();
 
         assert_eq!(compressed.key_quant.len(), num_vectors * (32 / 8));
         assert_eq!(compressed.key_outlier_quant.len(), num_vectors * (16 / 8));
@@ -170,11 +187,11 @@ mod tests {
 
     #[test]
     fn test_quantize_norms() {
-        let sketch = QJLSketch::new(4, 8, 8, 42);
+        let sketch = QJLSketch::new(4, 8, 8, 42).unwrap();
         let keys = vec![3.0, 0.0, 4.0, 0.0]; // norm = 5
         let outlier_indices = vec![2u8]; // dim 2 is outlier (value=4)
 
-        let compressed = sketch.quantize(&keys, 1, &outlier_indices);
+        let compressed = sketch.quantize(&keys, 1, &outlier_indices).unwrap();
 
         assert!((compressed.key_norms[0] - 5.0).abs() < 1e-6);
         assert!((compressed.outlier_norms[0] - 4.0).abs() < 1e-6);
@@ -184,7 +201,7 @@ mod tests {
     fn test_quantize_outlier_separation() {
         let d = 8;
         let s = 16;
-        let sketch = QJLSketch::new(d, s, s, 42);
+        let sketch = QJLSketch::new(d, s, s, 42).unwrap();
 
         // Vector with all energy in dim 0 (outlier) and dim 4 (inlier)
         let mut keys = vec![0.0f32; d];
@@ -192,7 +209,7 @@ mod tests {
         keys[4] = 5.0; // inlier
 
         let outlier_indices = vec![0u8];
-        let compressed = sketch.quantize(&keys, 1, &outlier_indices);
+        let compressed = sketch.quantize(&keys, 1, &outlier_indices).unwrap();
 
         // Outlier norm should be 10.0
         assert!((compressed.outlier_norms[0] - 10.0).abs() < 1e-6);
