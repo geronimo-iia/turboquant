@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Test (quality — ignored by default)
+        run: cargo test --locked -- --ignored
+
+      - name: Install cargo-audit
+        if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+        run: cargo install cargo-audit --locked --quiet
+
+      - name: Security audit
+        if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+        run: cargo audit

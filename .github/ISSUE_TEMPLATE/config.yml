@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussion
+    url: https://github.com/geronimo-iia/turboquant/discussions
+    about: >
+      For questions about usage, algorithms, or design decisions,
+      please open a Discussion rather than an Issue.
+  - name: Contributing guide
+    url: https://github.com/geronimo-iia/turboquant/blob/main/CONTRIBUTING.md
+    about: Build, test, lint instructions.
+  - name: Documentation
+    url: https://github.com/geronimo-iia/turboquant/blob/main/docs/README.md
+    about: Study documents, algorithms, roadmap.
