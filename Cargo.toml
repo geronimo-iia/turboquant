@@ -22,7 +22,7 @@ path = "src/lib.rs"
 nalgebra = "0.34"
 rand = "0.10"
 rand_chacha = "0.3"
-rand_distr = "0.4"
+rand_distr = "0.6"
 bytemuck = { version = "1.16", features = ["derive"] }
 rayon = "1.10"
 memmap2 = "0.9"
