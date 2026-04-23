@@ -7,9 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] — TBD
+## [0.2.0] — TBD
 
-First release. CPU-only TurboQuant compression, scoring, and persistence.
+**Breaking change:** all public functions now return `Result<T, QjlError>`
+instead of panicking on invalid input.
+
+### Added
+
+- `QjlError` enum with variants: `DimensionMismatch`, `InvalidSketchDim`,
+  `InvalidBitWidth`, `NonFiniteInput`, `OutlierIndexOutOfRange`,
+  `StoreMagicMismatch`, `StoreVersionMismatch`, `Io`
+- `qjl_sketch::error::Result<T>` type alias
+- `validate_finite` helper for NaN/infinity detection
+- Input validation on all public API boundaries
+- 18 new tests (7 error unit + 5 negative sketch/outlier + 6 negative integration)
+
+### Changed
+
+- `QJLSketch::new` returns `Result<Self>`
+- `QJLSketch::quantize` returns `Result<CompressedKeys>`
+- `QJLSketch::score` returns `Result<Vec<f32>>`
+- `detect_outliers` returns `Result<Vec<u8>>`
+- `quantize_values` returns `Result<CompressedValues>`
+- `quantized_dot` returns `Result<f32>`
+- `KeyQuantizer::new`, `build_sketch`, `update`, `attention_score` return `Result`
+- `KeyStore` and `ValueStore` methods return `qjl_sketch::error::Result`
+- Store config `read_from` returns `QjlError::StoreMagicMismatch` /
+  `StoreVersionMismatch` instead of `io::Error`
+
+## [0.1.0] — 2025-07-23
+
+First release. CPU-only QJL compression, scoring, and persistence.
 
 ### Core Algorithms
 

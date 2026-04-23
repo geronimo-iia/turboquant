@@ -18,7 +18,7 @@
 └─────────────────────────────────────────────────┘
 ```
 
-## Layer 1 — Unit Tests (32 tests) ✓
+## Layer 1 — Unit Tests (66 tests) ✓
 
 Inline in each `src/*.rs` module via `#[cfg(test)]`.
 
@@ -123,25 +123,34 @@ All run by default (no `#[ignore]`). Total runtime ~7 seconds.
 |------|-----------|-------------------|
 | `test_outlier_vs_no_outlier` | ≥ 20% reduction | Distortion with vs without outlier separation |
 
-## Layer 3 — Persistence Tests (planned)
+## Layer 3 — Persistence Tests (18 tests) ✓
 
-Will live in `tests/persistence/`. Covers:
+Integration tests in `tests/persistence/main.rs`.
 
-- Store write → reload → byte-identical compressed data
-- Score survives persistence (compress, store, reload, score = same)
-- Append-only update with generation tracking
-- Dead space tracking
-- Compaction reclaims space, preserves scores
-- Crash recovery: truncated tail, stale index
+| Test | What it checks |
+|------|----------------|
+| `test_keys_fresh_values_stale` | Keys updated, values stale — valid state |
+| `test_both_stores_independent_lifecycle` | Keys has 3 pages, values has 2 |
+| `test_dead_bytes_tracked_after_reopen` | Dead bytes persisted in index |
+| `test_key_store_compact_reclaims_space` | File shrinks, all pages readable |
+| `test_key_store_compact_preserves_scores` | Score identical after compaction |
+| `test_value_store_compact_reclaims_space` | Same for values |
+| `test_value_store_compact_preserves_dot` | quantized_dot identical after compaction |
+| `test_compact_survives_reopen` | Compact → reopen → all pages there |
+| `test_truncated_tail_recovery` | Garbage at EOF truncated on open |
+| `test_index_ahead_of_store` | Entries beyond EOF dropped |
+| `test_value_store_truncated_tail_recovery` | Same for values |
+| `test_value_store_index_ahead_of_store` | Same for values |
+| `test_nan_input_rejected_in_quantize` | NaN in keys → error |
+| `test_nan_input_rejected_in_score` | NaN in query → error |
+| `test_dimension_mismatch_in_quantize` | Wrong key length → error |
+| `test_dimension_mismatch_in_score` | Wrong query length → error |
+| `test_invalid_bit_width_rejected` | bits=3 → error |
+| `test_zero_dim_sketch_rejected` | head_dim=0 → error |
 
-## Layer 4 — End-to-End Tests (planned)
+## Layer 4 — End-to-End Tests (planned — in llm-wiki)
 
-Will live in `tests/e2e/`. Covers:
-
-- Pipeline smoke test: compress pages → query → ranked results
-- Relevant page ranks above irrelevant
-- Incremental page update changes ranking
-- Edge cases: empty store, single token, no match
+Pipeline tests live in the llm-wiki project.
 
 ## Test Layout
 

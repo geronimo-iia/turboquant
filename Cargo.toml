@@ -1,6 +1,6 @@
 [package]
 name = "qjl-sketch"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.95"
 description = "QJL sign-based vector compression and scoring with near-optimal distortion rate"
