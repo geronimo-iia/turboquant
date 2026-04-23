@@ -30,7 +30,7 @@ fn bench_score(c: &mut Criterion) {
         for _ in 0..num_pages {
             let keys = random_vec(32 * d, &mut rng); // 32 vectors per page
             let outlier_indices = detect_outliers(&keys, 32, d, 4).unwrap();
-            let compressed = sketch.quantize(&keys, 32, &outlier_indices);
+            let compressed = sketch.quantize(&keys, 32, &outlier_indices).unwrap();
             all_compressed.push(compressed);
         }
 
@@ -58,7 +58,7 @@ fn bench_score_single(c: &mut Criterion) {
 
     let keys = random_vec(64 * d, &mut rng);
     let outlier_indices = detect_outliers(&keys, 64, d, 4).unwrap();
-    let compressed = sketch.quantize(&keys, 64, &outlier_indices);
+    let compressed = sketch.quantize(&keys, 64, &outlier_indices).unwrap();
 
     c.bench_function("score_single_page_64vec", |b| {
         b.iter(|| sketch.score(black_box(&query), black_box(&compressed)));

@@ -59,7 +59,8 @@ impl<'a> KeyQuantizer<'a> {
                 detect_outliers(group_keys, self.group_size, d, self.outlier_count).unwrap();
             let compressed = self
                 .sketch
-                .quantize(group_keys, self.group_size, &outlier_indices);
+                .quantize(group_keys, self.group_size, &outlier_indices)
+                .unwrap();
             self.groups.push(compressed);
         }
 
@@ -96,7 +97,8 @@ impl<'a> KeyQuantizer<'a> {
                 detect_outliers(group_keys, self.group_size, d, self.outlier_count).unwrap();
             let compressed = self
                 .sketch
-                .quantize(group_keys, self.group_size, &outlier_indices);
+                .quantize(group_keys, self.group_size, &outlier_indices)
+                .unwrap();
             self.groups.push(compressed);
         }
 
@@ -116,7 +118,7 @@ impl<'a> KeyQuantizer<'a> {
 
         // Scores from compressed groups
         for group in &self.groups {
-            let group_scores = self.sketch.score(query, group);
+            let group_scores = self.sketch.score(query, group).unwrap();
             scores.extend_from_slice(&group_scores);
         }
 

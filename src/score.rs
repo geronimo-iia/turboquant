@@ -1,3 +1,4 @@
+use crate::error::{validate_finite, QjlError, Result};
 use crate::quantize::CompressedKeys;
 use crate::sketch::{matvec, QJLSketch};
 
@@ -13,11 +14,17 @@ impl QJLSketch {
     ///
     /// - `query`: [head_dim] f32
     /// - `compressed`: compressed key vectors from `quantize()`
-    pub fn score(&self, query: &[f32], compressed: &CompressedKeys) -> Vec<f32> {
+    pub fn score(&self, query: &[f32], compressed: &CompressedKeys) -> Result<Vec<f32>> {
         let d = self.head_dim;
         let s = self.sketch_dim;
         let os = self.outlier_sketch_dim;
-        assert_eq!(query.len(), d);
+        if query.len() != d {
+            return Err(QjlError::DimensionMismatch {
+                expected: d,
+                got: query.len(),
+            });
+        }
+        validate_finite(query, "score query")?;
 
         let inlier_bytes = s / 8;
         let outlier_bytes = os / 8;
@@ -68,7 +75,7 @@ impl QJLSketch {
                 + scl_outlier * compressed.outlier_norms[v] * dot_outlier;
         }
 
-        scores
+        Ok(scores)
     }
 }
 
@@ -132,8 +139,8 @@ mod tests {
         let v = random_vec(d, &mut rng);
 
         let outlier_indices = vec![0u8];
-        let compressed = sketch.quantize(&v, 1, &outlier_indices);
-        let scores = sketch.score(&v, &compressed);
+        let compressed = sketch.quantize(&v, 1, &outlier_indices).unwrap();
+        let scores = sketch.score(&v, &compressed).unwrap();
 
         let exact = v.iter().map(|x| x * x).sum::<f32>();
         let relative_error = (scores[0] - exact).abs() / exact;
@@ -156,8 +163,8 @@ mod tests {
         let exact: f32 = q.iter().zip(k.iter()).map(|(a, b)| a * b).sum();
 
         let outlier_indices = vec![0u8];
-        let compressed = sketch.quantize(&k, 1, &outlier_indices);
-        let scores = sketch.score(&q, &compressed);
+        let compressed = sketch.quantize(&k, 1, &outlier_indices).unwrap();
+        let scores = sketch.score(&q, &compressed).unwrap();
 
         assert_eq!(
             scores[0] > 0.0,
@@ -181,8 +188,8 @@ mod tests {
             .collect();
 
         let outlier_indices = vec![0u8];
-        let compressed = sketch.quantize(&keys, num_keys, &outlier_indices);
-        let scores = sketch.score(&q, &compressed);
+        let compressed = sketch.quantize(&keys, num_keys, &outlier_indices).unwrap();
+        let scores = sketch.score(&q, &compressed).unwrap();
 
         assert_eq!(scores.len(), num_keys);
         for s in &scores {

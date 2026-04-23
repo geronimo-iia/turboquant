@@ -1,3 +1,5 @@
+use crate::error::{validate_finite, QjlError, Result};
+
 /// Compressed value vectors — min-max quantized and bit-packed.
 #[derive(Clone, Debug)]
 pub struct CompressedValues {
@@ -21,12 +23,17 @@ pub struct CompressedValues {
 /// - `values`: input values [num_elements]
 /// - `group_size`: number of elements per quantization group
 /// - `bits`: quantization bit-width (2 or 4)
-pub fn quantize_values(values: &[f32], group_size: usize, bits: u8) -> CompressedValues {
-    assert!(bits == 2 || bits == 4, "bits must be 2 or 4");
-    assert!(
-        values.len().is_multiple_of(group_size),
-        "values.len() must be divisible by group_size"
-    );
+pub fn quantize_values(values: &[f32], group_size: usize, bits: u8) -> Result<CompressedValues> {
+    if bits != 2 && bits != 4 {
+        return Err(QjlError::InvalidBitWidth(bits));
+    }
+    if !values.len().is_multiple_of(group_size) {
+        return Err(QjlError::DimensionMismatch {
+            expected: values.len().next_multiple_of(group_size),
+            got: values.len(),
+        });
+    }
+    validate_finite(values, "quantize_values input")?;
 
     let num_elements = values.len();
     let num_groups = num_elements / group_size;
@@ -72,14 +79,14 @@ pub fn quantize_values(values: &[f32], group_size: usize, bits: u8) -> Compresse
         packed[word_idx] |= (q as i32) << shift;
     }
 
-    CompressedValues {
+    Ok(CompressedValues {
         packed,
         scale,
         mn,
         num_elements,
         bits,
         group_size,
-    }
+    })
 }
 
 /// Dequantize a single element from packed storage.
@@ -108,8 +115,14 @@ pub fn dequantize_all(compressed: &CompressedValues) -> Vec<f32> {
 /// - `compressed`: quantized values [num_elements]
 ///
 /// Returns the weighted sum (scalar).
-pub fn quantized_dot(weights: &[f32], compressed: &CompressedValues) -> f32 {
-    assert_eq!(weights.len(), compressed.num_elements);
+pub fn quantized_dot(weights: &[f32], compressed: &CompressedValues) -> Result<f32> {
+    if weights.len() != compressed.num_elements {
+        return Err(QjlError::DimensionMismatch {
+            expected: compressed.num_elements,
+            got: weights.len(),
+        });
+    }
+    validate_finite(weights, "quantized_dot weights")?;
 
     let feat_per_int = 32 / compressed.bits as usize;
     let mask = (1i32 << compressed.bits) - 1;
@@ -126,7 +139,7 @@ pub fn quantized_dot(weights: &[f32], compressed: &CompressedValues) -> f32 {
         acc += w * float_val;
     }
 
-    acc
+    Ok(acc)
 }
 
 #[cfg(test)]
@@ -136,7 +149,7 @@ mod tests {
     #[test]
     fn test_quantize_4bit_round_trip() {
         let values: Vec<f32> = (0..32).map(|i| i as f32 * 0.1).collect();
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
         let reconstructed = dequantize_all(&compressed);
 
         // 4-bit: 16 levels, max error ≈ scale/2 per element
@@ -152,7 +165,7 @@ mod tests {
     #[test]
     fn test_quantize_2bit_round_trip() {
         let values: Vec<f32> = (0..16).map(|i| i as f32).collect();
-        let compressed = quantize_values(&values, 8, 2);
+        let compressed = quantize_values(&values, 8, 2).unwrap();
         let reconstructed = dequantize_all(&compressed);
 
         for (orig, recon) in values.iter().zip(reconstructed.iter()) {
@@ -168,7 +181,7 @@ mod tests {
     #[test]
     fn test_quantize_4bit_range() {
         let values = vec![0.0f32; 16];
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
         let feat_per_int = 8; // 32/4
         let mask = 0xF;
         for word in &compressed.packed {
@@ -182,7 +195,7 @@ mod tests {
     #[test]
     fn test_quantize_2bit_range() {
         let values = vec![0.0f32; 16];
-        let compressed = quantize_values(&values, 8, 2);
+        let compressed = quantize_values(&values, 8, 2).unwrap();
         let feat_per_int = 16; // 32/2
         let mask = 0x3;
         for word in &compressed.packed {
@@ -197,10 +210,10 @@ mod tests {
     fn test_quantized_dot() {
         let values: Vec<f32> = (0..8).map(|i| i as f32).collect();
         let weights: Vec<f32> = vec![1.0; 8];
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
 
         let exact: f32 = values.iter().sum();
-        let approx = quantized_dot(&weights, &compressed);
+        let approx = quantized_dot(&weights, &compressed).unwrap();
 
         let relative_error = (exact - approx).abs() / exact;
         assert!(
@@ -213,10 +226,10 @@ mod tests {
     fn test_quantized_dot_weighted() {
         let values = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let weights = vec![0.5f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5];
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
 
         let exact: f32 = values.iter().zip(weights.iter()).map(|(v, w)| v * w).sum();
-        let approx = quantized_dot(&weights, &compressed);
+        let approx = quantized_dot(&weights, &compressed).unwrap();
 
         assert!(
             (exact - approx).abs() < 0.5,

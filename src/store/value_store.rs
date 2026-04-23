@@ -472,7 +472,7 @@ mod tests {
         let mut store = ValueStore::create(dir.path(), config).unwrap();
 
         let values: Vec<f32> = (0..16).map(|i| i as f32 * 0.5).collect();
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
 
         store.append(0xAA, 0xBB, &compressed).unwrap();
 
@@ -499,16 +499,16 @@ mod tests {
 
         let values: Vec<f32> = (0..16).map(|i| i as f32).collect();
         let weights: Vec<f32> = (0..16).map(|i| (i as f32) * 0.1).collect();
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
 
-        let dot_before = quantized_dot(&weights, &compressed);
+        let dot_before = quantized_dot(&weights, &compressed).unwrap();
 
         store.append(0x11, 0x22, &compressed).unwrap();
 
         let store2 = ValueStore::open(dir.path()).unwrap();
         let page = store2.get_page(0x11).unwrap();
         let reloaded = page.to_compressed_values();
-        let dot_after = quantized_dot(&weights, &reloaded);
+        let dot_after = quantized_dot(&weights, &reloaded).unwrap();
 
         assert_eq!(dot_before, dot_after);
     }
@@ -520,7 +520,7 @@ mod tests {
 
         for slug in 0u64..5 {
             let values: Vec<f32> = (0..8).map(|i| (slug as f32) + i as f32).collect();
-            let compressed = quantize_values(&values, 8, 4);
+            let compressed = quantize_values(&values, 8, 4).unwrap();
             store.append(slug, slug * 10, &compressed).unwrap();
         }
 
@@ -538,7 +538,7 @@ mod tests {
 
         for slug in 0u64..3 {
             let values: Vec<f32> = (0..8).map(|i| i as f32).collect();
-            let compressed = quantize_values(&values, 8, 4);
+            let compressed = quantize_values(&values, 8, 4).unwrap();
             store.append(slug, slug, &compressed).unwrap();
         }
 
@@ -555,7 +555,7 @@ mod tests {
         let mut store = ValueStore::create(dir.path(), test_config()).unwrap();
 
         let values: Vec<f32> = (0..8).map(|i| i as f32).collect();
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
         store.append(0xAA, 0xBB, &compressed).unwrap();
 
         assert!(store.is_fresh(0xAA, 0xBB));
@@ -569,11 +569,11 @@ mod tests {
         let mut store = ValueStore::create(dir.path(), test_config()).unwrap();
 
         let v1: Vec<f32> = (0..8).map(|i| i as f32).collect();
-        let c1 = quantize_values(&v1, 8, 4);
+        let c1 = quantize_values(&v1, 8, 4).unwrap();
         store.append(0xAA, 0x11, &c1).unwrap();
 
         let v2: Vec<f32> = (0..8).map(|i| i as f32 * 2.0).collect();
-        let c2 = quantize_values(&v2, 8, 4);
+        let c2 = quantize_values(&v2, 8, 4).unwrap();
         store.append(0xAA, 0x22, &c2).unwrap();
 
         assert_eq!(store.len(), 1);

@@ -617,7 +617,7 @@ mod tests {
         let mut rng = ChaCha20Rng::seed_from_u64(123);
         let keys = random_vec(4 * 16, &mut rng);
         let outlier_indices = vec![0u8, 1];
-        let compressed = sketch.quantize(&keys, 4, &outlier_indices);
+        let compressed = sketch.quantize(&keys, 4, &outlier_indices).unwrap();
 
         let slug_hash = 0xAABB;
         let content_hash = 0xCCDD;
@@ -654,9 +654,9 @@ mod tests {
         let keys = random_vec(8 * 16, &mut rng);
         let query = random_vec(16, &mut rng);
         let outlier_indices = vec![0u8];
-        let compressed = sketch.quantize(&keys, 8, &outlier_indices);
+        let compressed = sketch.quantize(&keys, 8, &outlier_indices).unwrap();
 
-        let scores_before = sketch.score(&query, &compressed);
+        let scores_before = sketch.score(&query, &compressed).unwrap();
 
         store.append(0x1234, 0x5678, &compressed).unwrap();
 
@@ -665,7 +665,7 @@ mod tests {
         let sketch2 = store2.config.build_sketch();
         let page = store2.get_page(0x1234).unwrap();
         let reloaded = page.to_compressed_keys(config.head_dim as usize);
-        let scores_after = sketch2.score(&query, &reloaded);
+        let scores_after = sketch2.score(&query, &reloaded).unwrap();
 
         assert_eq!(scores_before, scores_after);
     }
@@ -680,7 +680,7 @@ mod tests {
         let mut rng = ChaCha20Rng::seed_from_u64(789);
         for slug in 0u64..5 {
             let keys = random_vec(4 * 16, &mut rng);
-            let compressed = sketch.quantize(&keys, 4, &[0u8]);
+            let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
             store.append(slug, slug * 100, &compressed).unwrap();
         }
 
@@ -701,7 +701,7 @@ mod tests {
         let mut rng = ChaCha20Rng::seed_from_u64(111);
         for slug in 0u64..3 {
             let keys = random_vec(4 * 16, &mut rng);
-            let compressed = sketch.quantize(&keys, 4, &[0u8]);
+            let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
             store.append(slug, slug, &compressed).unwrap();
         }
 
@@ -721,7 +721,7 @@ mod tests {
 
         let mut rng = ChaCha20Rng::seed_from_u64(222);
         let keys = random_vec(4 * 16, &mut rng);
-        let compressed = sketch.quantize(&keys, 4, &[0u8]);
+        let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
         store.append(0xAA, 0xBB, &compressed).unwrap();
 
         assert!(store.is_fresh(0xAA, 0xBB));
@@ -738,11 +738,11 @@ mod tests {
 
         let mut rng = ChaCha20Rng::seed_from_u64(333);
         let keys_v1 = random_vec(4 * 16, &mut rng);
-        let compressed_v1 = sketch.quantize(&keys_v1, 4, &[0u8]);
+        let compressed_v1 = sketch.quantize(&keys_v1, 4, &[0u8]).unwrap();
         store.append(0xAA, 0x11, &compressed_v1).unwrap();
 
         let keys_v2 = random_vec(4 * 16, &mut rng);
-        let compressed_v2 = sketch.quantize(&keys_v2, 4, &[0u8]);
+        let compressed_v2 = sketch.quantize(&keys_v2, 4, &[0u8]).unwrap();
         store.append(0xAA, 0x22, &compressed_v2).unwrap();
 
         assert_eq!(store.len(), 1);

@@ -50,13 +50,13 @@ fn test_keys_fresh_values_stale() {
 
     // Write v1 to both stores
     let keys_v1 = random_vec(4 * 16, &mut rng);
-    let compressed_keys_v1 = sketch.quantize(&keys_v1, 4, &[0u8]);
+    let compressed_keys_v1 = sketch.quantize(&keys_v1, 4, &[0u8]).unwrap();
     key_store
         .append(slug, content_v1, &compressed_keys_v1)
         .unwrap();
 
     let values_v1: Vec<f32> = (0..8).map(|i| i as f32).collect();
-    let compressed_values_v1 = quantize_values(&values_v1, 8, 4);
+    let compressed_values_v1 = quantize_values(&values_v1, 8, 4).unwrap();
     val_store
         .append(slug, content_v1, &compressed_values_v1)
         .unwrap();
@@ -67,7 +67,7 @@ fn test_keys_fresh_values_stale() {
 
     // Update keys to v2, leave values at v1
     let keys_v2 = random_vec(4 * 16, &mut rng);
-    let compressed_keys_v2 = sketch.quantize(&keys_v2, 4, &[0u8]);
+    let compressed_keys_v2 = sketch.quantize(&keys_v2, 4, &[0u8]).unwrap();
     key_store
         .append(slug, content_v2, &compressed_keys_v2)
         .unwrap();
@@ -82,7 +82,7 @@ fn test_keys_fresh_values_stale() {
     let query = random_vec(16, &mut rng);
     let page = key_store.get_page(slug).unwrap();
     let reloaded = page.to_compressed_keys(kc.head_dim as usize);
-    let scores = sketch.score(&query, &reloaded);
+    let scores = sketch.score(&query, &reloaded).unwrap();
     assert_eq!(scores.len(), 4);
     assert!(scores.iter().all(|s| s.is_finite()));
 }
@@ -101,12 +101,12 @@ fn test_both_stores_independent_lifecycle() {
     // Add 3 pages to keys, only 2 to values
     for slug in 0u64..3 {
         let keys = random_vec(4 * 16, &mut rng);
-        let compressed = sketch.quantize(&keys, 4, &[0u8]);
+        let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
         key_store.append(slug, slug * 10, &compressed).unwrap();
     }
     for slug in 0u64..2 {
         let values: Vec<f32> = (0..8).map(|i| i as f32).collect();
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
         val_store.append(slug, slug * 10, &compressed).unwrap();
     }
 
@@ -127,7 +127,7 @@ fn test_dead_bytes_tracked_after_reopen() {
 
     let mut rng = ChaCha20Rng::seed_from_u64(300);
     let keys = random_vec(4 * 16, &mut rng);
-    let compressed = sketch.quantize(&keys, 4, &[0u8]);
+    let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
 
     store.append(0xAA, 0x11, &compressed).unwrap();
     store.append(0xAA, 0x22, &compressed).unwrap();
@@ -153,12 +153,12 @@ fn test_key_store_compact_reclaims_space() {
     // Write 5 pages, then update 3 of them (creates dead space)
     for slug in 0u64..5 {
         let keys = random_vec(4 * 16, &mut rng);
-        let compressed = sketch.quantize(&keys, 4, &[0u8]);
+        let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
         store.append(slug, slug * 10, &compressed).unwrap();
     }
     for slug in 0u64..3 {
         let keys = random_vec(4 * 16, &mut rng);
-        let compressed = sketch.quantize(&keys, 4, &[0u8]);
+        let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
         store.append(slug, slug * 100, &compressed).unwrap();
     }
 
@@ -193,7 +193,7 @@ fn test_key_store_compact_preserves_scores() {
     let mut rng = ChaCha20Rng::seed_from_u64(500);
     let keys = random_vec(4 * 16, &mut rng);
     let query = random_vec(16, &mut rng);
-    let compressed = sketch.quantize(&keys, 4, &[0u8]);
+    let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
 
     store.append(0xAA, 0x11, &compressed).unwrap();
     // Update to create dead space
@@ -210,7 +210,7 @@ fn test_key_store_compact_preserves_scores() {
     let page_after = store.get_page(0xAA).unwrap();
     let score_after = sketch.score(&query, &page_after.to_compressed_keys(kc.head_dim as usize));
 
-    assert_eq!(score_before, score_after);
+    assert_eq!(score_before.unwrap(), score_after.unwrap());
 }
 
 #[test]
@@ -221,12 +221,12 @@ fn test_value_store_compact_reclaims_space() {
 
     for slug in 0u64..5 {
         let values: Vec<f32> = (0..8).map(|i| (slug as f32) + i as f32).collect();
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
         store.append(slug, slug * 10, &compressed).unwrap();
     }
     for slug in 0u64..3 {
         let values: Vec<f32> = (0..8).map(|i| (slug as f32) * 2.0 + i as f32).collect();
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
         store.append(slug, slug * 100, &compressed).unwrap();
     }
 
@@ -257,7 +257,7 @@ fn test_value_store_compact_preserves_dot() {
 
     let values: Vec<f32> = (0..8).map(|i| i as f32).collect();
     let weights: Vec<f32> = (0..8).map(|i| (i as f32) * 0.1).collect();
-    let compressed = quantize_values(&values, 8, 4);
+    let compressed = quantize_values(&values, 8, 4).unwrap();
 
     store.append(0xAA, 0x11, &compressed).unwrap();
     store.append(0xAA, 0x22, &compressed).unwrap();
@@ -274,7 +274,7 @@ fn test_value_store_compact_preserves_dot() {
         &store.get_page(0xAA).unwrap().to_compressed_values(),
     );
 
-    assert_eq!(dot_before, dot_after);
+    assert_eq!(dot_before.unwrap(), dot_after.unwrap());
 }
 
 #[test]
@@ -287,12 +287,12 @@ fn test_compact_survives_reopen() {
     let mut rng = ChaCha20Rng::seed_from_u64(600);
     for slug in 0u64..3 {
         let keys = random_vec(4 * 16, &mut rng);
-        let compressed = sketch.quantize(&keys, 4, &[0u8]);
+        let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
         store.append(slug, slug, &compressed).unwrap();
     }
     // Update slug 0 to create dead space
     let keys = random_vec(4 * 16, &mut rng);
-    let compressed = sketch.quantize(&keys, 4, &[0u8]);
+    let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
     store.append(0, 99, &compressed).unwrap();
 
     store.compact().unwrap();
@@ -315,7 +315,7 @@ fn test_truncated_tail_recovery() {
 
     let mut rng = ChaCha20Rng::seed_from_u64(700);
     let keys = random_vec(4 * 16, &mut rng);
-    let compressed = sketch.quantize(&keys, 4, &[0u8]);
+    let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
     store.append(0xAA, 0xBB, &compressed).unwrap();
 
     let good_size = std::fs::metadata(dir.path().join("keys.bin"))
@@ -355,7 +355,7 @@ fn test_index_ahead_of_store() {
     // Write 2 pages
     for slug in 0u64..2 {
         let keys = random_vec(4 * 16, &mut rng);
-        let compressed = sketch.quantize(&keys, 4, &[0u8]);
+        let compressed = sketch.quantize(&keys, 4, &[0u8]).unwrap();
         store.append(slug, slug * 10, &compressed).unwrap();
     }
     drop(store);
@@ -389,7 +389,7 @@ fn test_value_store_truncated_tail_recovery() {
     let mut store = ValueStore::create(dir.path(), vc).unwrap();
 
     let values: Vec<f32> = (0..8).map(|i| i as f32).collect();
-    let compressed = quantize_values(&values, 8, 4);
+    let compressed = quantize_values(&values, 8, 4).unwrap();
     store.append(0xAA, 0xBB, &compressed).unwrap();
 
     let good_size = std::fs::metadata(dir.path().join("values.bin"))
@@ -424,7 +424,7 @@ fn test_value_store_index_ahead_of_store() {
 
     for slug in 0u64..2 {
         let values: Vec<f32> = (0..8).map(|i| (slug as f32) + i as f32).collect();
-        let compressed = quantize_values(&values, 8, 4);
+        let compressed = quantize_values(&values, 8, 4).unwrap();
         store.append(slug, slug * 10, &compressed).unwrap();
     }
     drop(store);

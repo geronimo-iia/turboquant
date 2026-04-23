@@ -37,7 +37,7 @@ fn bench_cold_start(c: &mut Criterion) {
     for slug in 0u64..100 {
         let keys = random_vec(32 * 128, &mut rng);
         let outlier_indices = detect_outliers(&keys, 32, 128, 4).unwrap();
-        let compressed = sketch.quantize(&keys, 32, &outlier_indices);
+        let compressed = sketch.quantize(&keys, 32, &outlier_indices).unwrap();
         store.append(slug, slug * 10, &compressed).unwrap();
     }
     drop(store);
@@ -59,7 +59,7 @@ fn bench_append(c: &mut Criterion) {
 
     let keys = random_vec(32 * 128, &mut rng);
     let outlier_indices = detect_outliers(&keys, 32, 128, 4).unwrap();
-    let compressed = sketch.quantize(&keys, 32, &outlier_indices);
+    let compressed = sketch.quantize(&keys, 32, &outlier_indices).unwrap();
 
     let mut slug = 0u64;
     c.bench_function("append_single_page", |b| {
@@ -82,7 +82,7 @@ fn bench_get_page(c: &mut Criterion) {
     for slug in 0u64..100 {
         let keys = random_vec(32 * 128, &mut rng);
         let outlier_indices = detect_outliers(&keys, 32, 128, 4).unwrap();
-        let compressed = sketch.quantize(&keys, 32, &outlier_indices);
+        let compressed = sketch.quantize(&keys, 32, &outlier_indices).unwrap();
         store.append(slug, slug * 10, &compressed).unwrap();
     }
 
