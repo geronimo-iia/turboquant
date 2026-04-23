@@ -104,7 +104,11 @@ Done together since validation returns the new error type.
 - [ ] `cargo clippy -- -D warnings` — clean
 - [ ] No remaining `assert!` on user input in public functions
 
-**Step 11 — Documentation + release**
+**Step 11 — benchmark
+
+- [ ] update benchmark code
+
+**Step 12 — Documentation + release**
 
 - [ ] Update `docs/design/algorithms.md` — all function signatures show `Result`
 - [ ] Update `docs/design/store.md` — error handling section reflects `QjlError`

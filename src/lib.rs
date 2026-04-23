@@ -1,3 +1,4 @@
+pub mod error;
 pub mod outliers;
 pub mod quantize;
 pub mod quantizer;
