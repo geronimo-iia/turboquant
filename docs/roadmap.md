@@ -33,8 +33,7 @@ Set up the crate, CI, and test harness.
 - [x] `tests/` directory structure matching `design/testing.md`
 - [x] `cargo build` — clean
 - [x] `cargo test` — passes (zero tests)
-- [ ] Generate Python reference fixtures (`tests/fixtures/reference/`)
-      from `external/QJL` with pinned seed=42
+
 
 ### Milestone: `cargo test` passes (zero tests, clean build)
 
@@ -96,8 +95,6 @@ One module per concern. No persistence, no pipeline — pure math.
 Statistical tests comparing our implementation against exact computation
 and the Python reference.
 
-- [ ] `tests/quality/test_cross_validate.rs` — byte-match against
-      Python `.npz` fixtures for quantized output, tolerance for scores
 - [ ] `tests/quality/test_distortion.rs` — MSE / signal over 10K pairs,
       assert < 0.15
 - [ ] `tests/quality/test_ranking.rs` — Kendall's tau > 0.90 on 100
@@ -211,8 +208,6 @@ projects/turboquant/
 │   │   └── store.rs         ← KVStore, append, compact, mmap
 │   └── pipeline.rs          ← Pipeline (compress, query, recompress)
 ├── tests/
-│   ├── fixtures/
-│   │   └── reference/       ← Python-generated .npz files
 │   ├── unit/
 │   ├── quality/
 │   ├── persistence/
