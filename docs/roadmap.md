@@ -125,43 +125,62 @@ All run by default (~7 seconds total).
 
 ## Phase 3 — Persistence
 
-Implement the packed-file store from `design/persistence.md`.
+Implement the two-store design from `design/persistence.md`.
+Keys and values in separate files with independent indexes.
 
-### 3a — Config file
+### 3a — Index format + sketch reconstruction
 
-- [ ] `src/store/config.rs`: `StoreConfig` struct
-- [ ] Write/read `config.bin` — header + projection matrices
-- [ ] mmap-based loading via `memmap2`
+- [ ] `src/store/config.rs`: index header read/write (sketch params
+      in keys.idx, value params in values.idx)
+- [ ] Reconstruct `QJLSketch` from header params (deterministic seed)
+- [ ] Tests: write header, read back, sketch produces same scores
 
-### 3b — Packed store
+### 3b — Key store
 
-- [ ] `src/store/store.rs`: `KVStore` struct
-- [ ] `append(slug_hash, content_hash, compressed, generation)`
-- [ ] `store.bin` append-only write with entry header
-- [ ] `store.idx` — sorted index, binary search lookup
-- [ ] `get_page(slug_hash) → PageView` — zero-copy slice into mmap
-- [ ] Tests: write-read round-trip, score survives persistence
+- [ ] `src/store/kv.rs`: `KeyStore` struct
+- [ ] `KeyStore::create(dir, sketch_params)` — create empty keys.bin + keys.idx
+- [ ] `KeyStore::open(dir)` — read keys.idx header, construct QJLSketch,
+      mmap keys.bin, load index
+- [ ] `append(slug_hash, content_hash, compressed_keys)` — serialize
+      entry, pwrite at EOF, fsync, atomic index rewrite
+- [ ] `get_page(slug_hash) → Option<KeyPageView>` — binary search,
+      zero-copy slice into mmap
+- [ ] `KeyPageView` — accessors for key_quant, key_norms,
+      outlier_norms, outlier_indices via bytemuck
+- [ ] Tests: write-read round-trip, score survives persistence,
+      multiple pages, page not found returns None
 
-### 3c — Update and staleness
+### 3c — Value store
 
-- [ ] `is_fresh(slug_hash, current_content_hash) → bool`
+- [ ] `src/store/kv.rs`: `ValueStore` struct (same file, similar pattern)
+- [ ] `ValueStore::create(dir, bits, group_size)`
+- [ ] `ValueStore::open(dir)`
+- [ ] `append(slug_hash, content_hash, compressed_values)`
+- [ ] `get_page(slug_hash) → Option<ValuePageView>`
+- [ ] `ValuePageView` — accessors for packed, scale, mn
+- [ ] Tests: write-read round-trip, quantized_dot survives persistence
+
+### 3d — Update and staleness
+
+- [ ] `is_fresh(slug_hash, content_hash) → bool` on both stores
 - [ ] Append with higher generation, old entry becomes dead
-- [ ] `dead_bytes()` / `live_bytes()` tracking
-- [ ] Tests: update overwrites old, dead space tracked, staleness detection
+- [ ] `dead_bytes()` / `live_bytes()` in index header
+- [ ] Tests: update overwrites old, dead space tracked, staleness
+      detection, keys fresh but values stale
 
-### 3d — Compaction
+### 3e — Compaction
 
-- [ ] `compact()` — rewrite live entries, update index
+- [ ] `compact()` per store — rewrite live entries, rebuild index
 - [ ] Atomic rename for crash safety
-- [ ] Tests: reclaims space, preserves scores, all pages still readable
+- [ ] Tests: reclaims space, preserves scores, all pages readable
 
-### 3e — Crash recovery
+### 3f — Crash recovery
 
 - [ ] Detect truncated tail on open (magic check), truncate
-- [ ] Rebuild index from store if index is stale/missing
-- [ ] Tests: truncated tail, index ahead of store
+- [ ] Rebuild index from .bin scan if index missing or stale
+- [ ] Tests: truncated tail, index ahead of store, missing index
 
-### Milestone: `cargo test persistence` — compress, persist, reload, score = same result
+### Milestone: compress → persist → reload → score = same result
 
 ## Phase 4 — Pipeline
 
@@ -224,7 +243,7 @@ projects/turboquant/
 │   ├── store/
 │   │   ├── mod.rs
 │   │   ├── config.rs        ← StoreConfig, config.bin
-│   │   └── store.rs         ← KVStore, append, compact, mmap
+│   │   └── kv.rs            ← KVStore, append, compact, mmap
 │   └── pipeline.rs          ← Pipeline (compress, query, recompress)
 ├── tests/
 │   ├── unit/
