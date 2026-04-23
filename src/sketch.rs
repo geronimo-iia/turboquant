@@ -115,7 +115,7 @@ fn transpose(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
 /// Compute the matrix-vector product: result = mat @ vec.
 /// mat is [rows, cols] row-major, vec is [cols].
 #[allow(clippy::needless_range_loop)]
-pub(crate) fn matvec(mat: &[f32], rows: usize, cols: usize, vec: &[f32]) -> Vec<f32> {
+pub fn matvec(mat: &[f32], rows: usize, cols: usize, vec: &[f32]) -> Vec<f32> {
     assert_eq!(mat.len(), rows * cols);
     assert_eq!(vec.len(), cols);
     let mut out = vec![0.0f32; rows];
@@ -131,7 +131,7 @@ pub(crate) fn matvec(mat: &[f32], rows: usize, cols: usize, vec: &[f32]) -> Vec<
 }
 
 /// Compute the vector L2 norm.
-pub(crate) fn l2_norm(v: &[f32]) -> f32 {
+pub fn l2_norm(v: &[f32]) -> f32 {
     v.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 

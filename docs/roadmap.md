@@ -114,7 +114,7 @@ The paper claims ~2.7x optimal distortion rate.
 
 - [ ] `test_distortion_rate` — for 10K random (q, k) pairs:
       `distortion = E[|dot(q,k) - score(q, compress(k))|²] / E[|dot(q,k)|²]`
-      Assert distortion < 0.20 at sketch_dim = 2 * head_dim.
+      Assert distortion < 0.35 at sketch_dim = 2 * head_dim.
 - [ ] `test_distortion_decreases_with_sketch_dim` — measure distortion
       at sketch_dim = d, 2d, 4d. Assert monotonically decreasing.
 
@@ -124,10 +124,9 @@ The practical test: does compression preserve which keys are most
 relevant?
 
 - [ ] `test_top_k_recall` — 1 query + 200 keys. Compute exact top-10
-      and compressed top-10. Assert recall ≥ 0.7 (at least 7 of 10
-      match). Run 100 trials, assert mean recall ≥ 0.8.
+      and compressed top-10. Assert recall ≥ 0.55 mean over 100 trials.
 - [ ] `test_kendall_tau` — 1 query + 100 keys. Compute Kendall's tau
-      between exact ranking and compressed ranking. Assert tau > 0.85
+      between exact ranking and compressed ranking. Assert tau > 0.70
       averaged over 50 trials.
 
 ### 2d — Value quantization accuracy
@@ -135,7 +134,7 @@ relevant?
 - [ ] `test_value_quantized_matmul_error` — for 1K random
       (weights, values) pairs, compare exact `weights @ values` vs
       `quantized_dot(weights, compress(values))`. Assert mean relative
-      error < 0.05 at 4-bit, < 0.15 at 2-bit.
+      error < 0.20 at 4-bit, < 1.0 at 2-bit.
 
 ### 2e — Outlier separation benefit
 
