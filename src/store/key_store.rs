@@ -571,7 +571,6 @@ fn read_f32_slice(bytes: &[u8], count: usize) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sketch::QJLSketch;
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
     use rand_distr::{Distribution, StandardNormal};

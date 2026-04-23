@@ -197,18 +197,18 @@ Keys and values in separate files with independent indexes.
 
 ## Phase 4 — Performance
 
-Not needed for correctness, but needed for practical use.
+Baseline benchmarks established. Optimization deferred until llm-wiki
+integration reveals real-world bottlenecks.
 
-- [ ] SIMD popcount: `std::arch` for `_popcnt64` on x86, fallback
-      to `u8::count_ones()`
-- [ ] Batch projection as GEMM via `nalgebra` BLAS
-- [ ] `rayon` parallelism for multi-head score computation
-- [ ] Benchmark suite: `benches/` with `criterion`
-      — score latency vs. page count (100, 1K, 10K)
-      — compress throughput (pages/sec)
-      — cold start time (mmap open + first query)
+- [x] Benchmark suite with criterion (`benches/score.rs`, `compress.rs`,
+      `store.rs`)
+- [x] Baseline numbers documented in `design/benchmarks.md`
+- [ ] SIMD: restructure `signed_dot` to process 8 bits per iteration
+- [ ] Batch projection as GEMM via nalgebra BLAS
+- [ ] `rayon` parallelism for multi-page scoring
+- [ ] Batch append (amortize fsync cost)
 
-### Milestone: benchmark numbers documented, no regressions in CI
+### Milestone: benchmark numbers documented ✓, optimization deferred
 
 ## Future
 
