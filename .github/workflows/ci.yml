@@ -38,9 +38,6 @@ jobs:
       - name: Test
         run: cargo test --locked
 
-      - name: Test (quality — ignored by default)
-        run: cargo test --locked -- --ignored
-
       - name: Install cargo-audit
         if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
         run: cargo install cargo-audit --locked --quiet

@@ -46,7 +46,6 @@ fn measure_distortion_with_outliers(
 }
 
 #[test]
-#[ignore]
 fn test_outlier_vs_no_outlier() {
     let d = 128;
     let s = 256;

@@ -31,7 +31,6 @@ fn measure_value_error(bits: u8, trials: usize, seed: u64) -> f64 {
 }
 
 #[test]
-#[ignore]
 fn test_value_quantized_matmul_error_4bit() {
     let mean_err = measure_value_error(4, 1000, 700);
     assert!(
@@ -41,7 +40,6 @@ fn test_value_quantized_matmul_error_4bit() {
 }
 
 #[test]
-#[ignore]
 fn test_value_quantized_matmul_error_2bit() {
     let mean_err = measure_value_error(2, 1000, 800);
     assert!(

@@ -30,9 +30,6 @@ jobs:
       - name: Test
         run: cargo test --locked
 
-      - name: Test (quality)
-        run: cargo test --locked -- --ignored
-
   publish:
     needs: test
     runs-on: ubuntu-latest

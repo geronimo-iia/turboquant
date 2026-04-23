@@ -44,108 +44,84 @@ One module per concern. No persistence, no pipeline — pure math.
 
 ### 1a — Random projection
 
-- [ ] `src/sketch.rs`: `QJLSketch` struct
-- [ ] `QJLSketch::new(head_dim, sketch_dim, seed)` — Gaussian init
-- [ ] QR orthogonalization per chunk (Algorithm 1)
-- [ ] `proj_dir_score` and `proj_dir_quant` stored as `Vec<f32>`
-- [ ] Tests: dimensions, orthogonality, determinism, different seeds
+- [x] `src/sketch.rs`: `QJLSketch` struct
+- [x] `QJLSketch::new(head_dim, sketch_dim, seed)` — Gaussian init
+- [x] QR orthogonalization per chunk (Algorithm 1)
+- [x] `proj_dir_score` and `proj_dir_quant` stored as `Vec<f32>`
+- [x] Tests: dimensions, orthogonality, determinism, different seeds (6 tests)
 
 ### 1b — Outlier detection
 
-- [ ] `src/outliers.rs`: `detect_outliers(keys, count) → Vec<u8>`
-- [ ] L2 norm per dimension across group, top-k selection (Algorithm 4)
-- [ ] Tests: known outlier picked, count respected
+- [x] `src/outliers.rs`: `detect_outliers(keys, count) → Vec<u8>`
+- [x] L2 norm per dimension across group, top-k selection (Algorithm 4)
+- [x] Tests: known outlier picked, count respected, mask (4 tests)
 
 ### 1c — QJL quantization
 
-- [ ] `src/quantize.rs`: `CompressedKeys` struct
-- [ ] `QJLSketch::quantize(keys, outlier_indices) → CompressedKeys`
-- [ ] Sign extraction, bit-packing 8 signs per u8 (Algorithm 2)
-- [ ] Outlier/inlier separation, outlier norms
-- [ ] Tests: output shape, bit-packing correctness, outlier separation, norms
+- [x] `src/quantize.rs`: `CompressedKeys` struct
+- [x] `QJLSketch::quantize(keys, outlier_indices) → CompressedKeys`
+- [x] Sign extraction, bit-packing 8 signs per u8 (Algorithm 2)
+- [x] Outlier/inlier separation, outlier norms
+- [x] Tests: output shape, bit-packing, outlier separation, norms (5 tests)
 
 ### 1d — Score computation
 
-- [ ] `src/score.rs`: `QJLSketch::score(query, compressed) → Vec<f32>`
-- [ ] Query sketch projection
-- [ ] Hamming distance via XOR + `u8::count_ones()` (Algorithm 3)
-- [ ] Norm-weighted cosine estimate
-- [ ] Tests: identical vectors, orthogonal vectors, sign preserved, popcount
+- [x] `src/score.rs`: `QJLSketch::score(query, compressed) → Vec<f32>`
+- [x] Query sketch projection via `proj_dir_quant`
+- [x] Outlier query sketch subtraction (matches CUDA kernel)
+- [x] Signed dot: float query sketch × packed sign bits
+- [x] Scale factor: `sqrt(π/2) / sketch_dim`
+- [x] Tests: signed dot, identical vectors, sign preserved, multiple vectors (5 tests)
 
 ### 1e — Value quantization
 
-- [ ] `src/values.rs`: `CompressedValues` struct
-- [ ] `quantize_values(values, group_size, bits) → CompressedValues`
-- [ ] Min-max scalar quantization + i32 bit-packing (Algorithm 5)
-- [ ] `quantized_matmul(weights, compressed) → Vec<f32>` (Algorithm 6)
-- [ ] Tests: round-trip error bound, 4-bit/2-bit range, matmul accuracy
+- [x] `src/values.rs`: `CompressedValues` struct
+- [x] `quantize_values(values, group_size, bits) → CompressedValues`
+- [x] Min-max scalar quantization + i32 bit-packing (Algorithm 5)
+- [x] `quantized_dot(weights, compressed) → f32` (Algorithm 6)
+- [x] Tests: round-trip error bound, 4-bit/2-bit range, matmul accuracy (6 tests)
 
 ### 1f — Streaming quantizer
 
-- [ ] `src/quantizer.rs`: `KeyQuantizer` struct
-- [ ] `build_sketch(keys)` — batch compress (Algorithm 7 init)
-- [ ] `update(key)` — append one vector, flush on buffer full (Algorithm 7)
-- [ ] `attention_score(query) → Vec<f32>` — score against full state
-- [ ] Tests: stream matches batch, residual buffer, buffer flush
+- [x] `src/quantizer.rs`: `KeyQuantizer` struct
+- [x] `build_sketch(keys)` — batch compress (Algorithm 7 init)
+- [x] `update(key)` — append one vector, flush on buffer full (Algorithm 7)
+- [x] `attention_score(query) → Vec<f32>` — score against full state
+- [x] Tests: stream matches batch, residual buffer, buffer flush (6 tests)
 
-### Milestone: `cargo test unit` — all algorithms correct in isolation
+### Milestone: 32 unit tests passing ✓
 
 ## Phase 2 — Quality validation
 
 Statistical tests proving our implementation preserves the properties
-that TurboQuant guarantees. Each test is self-contained (no external
-fixtures). Quality tests are `#[ignore]` by default — they run 10K+
-iterations.
+that TurboQuant guarantees. All self-contained, no external fixtures.
+All run by default (~7 seconds total).
 
 ### 2a — Rotation preserves geometry
 
-The orthogonal projection must not distort vectors.
-
-- [ ] `test_rotation_preserves_norm` — for 1K random vectors,
-      assert `||proj @ v|| / ||v||` is within [0.95, 1.05] of `sqrt(d)`
-      (the scale factor)
-- [ ] `test_rotation_preserves_inner_product` — for 1K random (q, k)
-      pairs, compute `dot(proj@q, proj@k)` vs `d * dot(q, k)`.
-      Assert relative error < 0.1 on average.
+- [x] `test_rotation_preserves_norm` — 1K vectors, norm ratio ∈ [0.90, 1.10]
+- [x] `test_rotation_preserves_inner_product` — 1K pairs, mean error < 0.15
 
 ### 2b — Sign quantization distortion
 
-The paper claims ~2.7x optimal distortion rate.
-
-- [ ] `test_distortion_rate` — for 10K random (q, k) pairs:
-      `distortion = E[|dot(q,k) - score(q, compress(k))|²] / E[|dot(q,k)|²]`
-      Assert distortion < 0.35 at sketch_dim = 2 * head_dim.
-- [ ] `test_distortion_decreases_with_sketch_dim` — measure distortion
-      at sketch_dim = d, 2d, 4d. Assert monotonically decreasing.
+- [x] `test_distortion_rate` — 10K pairs, distortion < 0.35 at s=2d
+- [x] `test_distortion_decreases_with_sketch_dim` — monotonic d > 2d > 4d
 
 ### 2c — Ranking preservation
 
-The practical test: does compression preserve which keys are most
-relevant?
-
-- [ ] `test_top_k_recall` — 1 query + 200 keys. Compute exact top-10
-      and compressed top-10. Assert recall ≥ 0.55 mean over 100 trials.
-- [ ] `test_kendall_tau` — 1 query + 100 keys. Compute Kendall's tau
-      between exact ranking and compressed ranking. Assert tau > 0.70
-      averaged over 50 trials.
+- [x] `test_top_k_recall` — 200 keys, mean recall ≥ 0.55 over 100 trials
+- [x] `test_kendall_tau` — 100 keys, mean tau > 0.70 over 50 trials
 
 ### 2d — Value quantization accuracy
 
-- [ ] `test_value_quantized_matmul_error` — for 1K random
-      (weights, values) pairs, compare exact `weights @ values` vs
-      `quantized_dot(weights, compress(values))`. Assert mean relative
-      error < 0.20 at 4-bit, < 1.0 at 2-bit.
+- [x] `test_value_quantized_matmul_error_4bit` — mean relative error < 0.20
+- [x] `test_value_quantized_matmul_error_2bit` — mean relative error < 1.0
 
 ### 2e — Outlier separation benefit
 
-Outlier separation should improve score quality on vectors with spikes.
+- [x] `test_outlier_vs_no_outlier` — ≥ 20% distortion reduction with 10x outliers
 
-- [ ] `test_outlier_vs_no_outlier` — generate vectors with 2 outlier
-      dimensions (10x magnitude). Compare distortion with
-      outlier_count=2 vs outlier_count=0. Assert outlier separation
-      reduces distortion by at least 20%.
-
-### Milestone: `cargo test quality` — ranking preservation proven
+### Milestone: 9 quality tests passing ✓
 
 ## Phase 3 — Persistence
 

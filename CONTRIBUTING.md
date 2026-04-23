@@ -10,8 +10,7 @@
 
 ```bash
 cargo build                      # debug build
-cargo test                       # unit + persistence + e2e tests
-cargo test -- --ignored          # include slow quality tests
+cargo test                       # all tests (unit + quality, ~7s)
 cargo clippy -- -D warnings      # lint — must pass with zero warnings
 cargo fmt -- --check             # check formatting
 cargo fmt                        # auto-format

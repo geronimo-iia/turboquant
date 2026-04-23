@@ -4,7 +4,6 @@ use rand_chacha::ChaCha20Rng;
 use turboquant::sketch::QJLSketch;
 
 #[test]
-#[ignore]
 fn test_top_k_recall() {
     let d = 64;
     let s = 256;
@@ -45,7 +44,6 @@ fn test_top_k_recall() {
 }
 
 #[test]
-#[ignore]
 fn test_kendall_tau() {
     let d = 64;
     let s = 256;

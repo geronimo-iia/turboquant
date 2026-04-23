@@ -4,7 +4,6 @@ use rand_chacha::ChaCha20Rng;
 use turboquant::sketch::{l2_norm, matvec, QJLSketch};
 
 #[test]
-#[ignore]
 fn test_rotation_preserves_norm() {
     let d = 128;
     let s = 256;
@@ -37,7 +36,6 @@ fn test_rotation_preserves_norm() {
 }
 
 #[test]
-#[ignore]
 fn test_rotation_preserves_inner_product() {
     let d = 128;
     let s = 256;
