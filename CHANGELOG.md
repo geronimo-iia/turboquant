@@ -9,14 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] — TBD
 
-### Changed
-
-- Upgrade to Rust 2024 edition (`edition = "2024"` in Cargo.toml and rustfmt.toml)
-
-### Fixed
-
-- `benches/score.rs`: missing `.unwrap()` on `sketch.score()` Result
-
 ### Added
 
 - `codebook` module — Lloyd-Max optimal scalar quantization codebook
@@ -30,14 +22,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `normal_icdf` — Beasley-Springer-Moro rational approximation
   - `sample_beta_marginal` — inverse CDF via bisection / Gaussian
   - `simpson_integrate` — paired Simpson's rule
-- `QjlError::InvalidCodebookBitWidth` and `QjlError::InvalidDimension` variants
+- `hamming_similarity` — standalone Hamming similarity on packed sign bits
+- `QJLSketch::score_compressed` — batch compressed-vs-compressed scoring
+  via Hamming-based cosine estimation with outlier separation
+- `QJLSketch::score_compressed_pair` — single-pair variant for
+  cross-index comparison (e.g. page-to-page similarity)
+- `QjlError::InvalidCodebookBitWidth`, `InvalidDimension`,
+  `SketchParamMismatch`, and `IndexOutOfBounds` error variants
 - `THIRD_PARTY_NOTICES` file (TurboQuant MIT attribution)
-- 30 new tests (14 codebook + 12 math + 4 error)
+- 41 new tests (14 codebook + 12 math + 4 error + 4 hamming +
+  3 score_compressed + 3 score_compressed_pair + 1 quality)
+
+### Changed
+
+- Upgrade to Rust 2024 edition (`edition = "2024"` in Cargo.toml and rustfmt.toml)
+- Split `docs/design/algorithms.md` into per-algorithm files under
+  `docs/design/algorithms/`
 
 ### Fixed
 
 - 15 rustdoc `broken_intra_doc_links` warnings across existing modules
   (escaped `[brackets]` in doc comments)
+- `benches/score.rs`: missing `.unwrap()` on `sketch.score()` Result
 
 ## [0.2.0] — 2025-07-23
 

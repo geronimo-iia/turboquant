@@ -12,13 +12,13 @@ Source material and research analysis.
 
 Architecture and implementation decisions.
 
-| Document                                       | What it covers                                                  |
-| ---------------------------------------------- | --------------------------------------------------------------- |
-| [design/algorithms.md](design/algorithms.md)   | 8 algorithms: QJL projection through Lloyd-Max codebook          |
-| [design/persistence.md](design/persistence.md) | Two-store file format, mmap loading, compaction                 |
-| [design/store.md](design/store.md)             | Store API usage, lifecycle, error handling, crash safety        |
-| [design/benchmarks.md](design/benchmarks.md)   | Benchmark suite, baseline results, optimization targets         |
-| [design/testing.md](design/testing.md)         | 4-layer test strategy                                           |
+| Document                                          | What it covers                                                 |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| [design/algorithms/](design/algorithms/README.md) | Algorithm catalog: projection, quantization, scoring, codebook |
+| [design/persistence.md](design/persistence.md)    | Two-store file format, mmap loading, compaction                |
+| [design/store.md](design/store.md)                | Store API usage, lifecycle, error handling, crash safety       |
+| [design/benchmarks.md](design/benchmarks.md)      | Benchmark suite, baseline results, optimization targets        |
+| [design/testing.md](design/testing.md)            | 4-layer test strategy                                          |
 
 ## Guides
 

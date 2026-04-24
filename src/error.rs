@@ -21,6 +21,10 @@ pub enum QjlError {
     InvalidCodebookBitWidth(u8),
     /// Dimension is invalid (must be > 0).
     InvalidDimension(usize),
+    /// Two CompressedKeys have incompatible sketch parameters.
+    SketchParamMismatch { context: &'static str },
+    /// Vector index out of bounds.
+    IndexOutOfBounds { index: usize, len: usize },
     /// I/O error from the underlying filesystem.
     Io(std::io::Error),
 }
@@ -63,6 +67,12 @@ impl fmt::Display for QjlError {
             }
             Self::InvalidDimension(dim) => {
                 write!(f, "invalid dimension: {dim} (must be > 0)")
+            }
+            Self::SketchParamMismatch { context } => {
+                write!(f, "sketch parameter mismatch: {context}")
+            }
+            Self::IndexOutOfBounds { index, len } => {
+                write!(f, "index {index} out of bounds for length {len}")
             }
             Self::Io(e) => write!(f, "I/O error: {e}"),
         }
@@ -127,6 +137,8 @@ mod tests {
             },
             QjlError::InvalidCodebookBitWidth(0),
             QjlError::InvalidDimension(0),
+            QjlError::SketchParamMismatch { context: "test" },
+            QjlError::IndexOutOfBounds { index: 5, len: 3 },
             QjlError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "gone")),
         ];
         for v in &variants {
