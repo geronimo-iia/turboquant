@@ -7,12 +7,12 @@ impl QJLSketch {
     ///
     /// Matches the QJL CUDA kernel (`calc_score_kernel`):
     ///   q_sketch = query @ proj_dir_score  (full sketch)
-    ///   q_outlier_sketch[i] = Σ_j query[outlier_j] * proj_dir_score[outlier_j, i]
+    ///   q_outlier_sketch\[i\] = Σ_j query\[outlier_j\] * proj_dir_score\[outlier_j, i\]
     ///   q_inlier_sketch = q_sketch - q_outlier_sketch
-    ///   score = sqrt(π/2)/s * ||k_inlier|| * Σ sign(k_inlier_i) * q_inlier_sketch[i]
-    ///         + sqrt(π/2)/os * ||k_outlier|| * Σ sign(k_outlier_i) * q_outlier_sketch[i]
+    ///   score = sqrt(π/2)/s * ||k_inlier|| * Σ sign(k_inlier_i) * q_inlier_sketch\[i\]
+    ///         + sqrt(π/2)/os * ||k_outlier|| * Σ sign(k_outlier_i) * q_outlier_sketch\[i\]
     ///
-    /// - `query`: [head_dim] f32
+    /// - `query`: \[head_dim\] f32
     /// - `compressed`: compressed key vectors from `quantize()`
     pub fn score(&self, query: &[f32], compressed: &CompressedKeys) -> Result<Vec<f32>> {
         let d = self.head_dim;

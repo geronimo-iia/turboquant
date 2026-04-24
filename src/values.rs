@@ -5,9 +5,9 @@ use crate::error::{validate_finite, QjlError, Result};
 pub struct CompressedValues {
     /// Bit-packed quantized values. Layout depends on bits.
     pub packed: Vec<i32>,
-    /// Per-group scale factors [num_groups].
+    /// Per-group scale factors \[num_groups\].
     pub scale: Vec<f32>,
-    /// Per-group minimums [num_groups].
+    /// Per-group minimums \[num_groups\].
     pub mn: Vec<f32>,
     /// Number of elements before packing.
     pub num_elements: usize,
@@ -20,7 +20,7 @@ pub struct CompressedValues {
 /// Quantize a 1-D slice of f32 values with min-max scalar quantization
 /// and pack into i32 words.
 ///
-/// - `values`: input values [num_elements]
+/// - `values`: input values \[num_elements\]
 /// - `group_size`: number of elements per quantization group
 /// - `bits`: quantization bit-width (2 or 4)
 pub fn quantize_values(values: &[f32], group_size: usize, bits: u8) -> Result<CompressedValues> {
@@ -111,8 +111,8 @@ pub fn dequantize_all(compressed: &CompressedValues) -> Vec<f32> {
 
 /// Fused dequantize + weighted sum: result = weights @ dequantized_values.
 ///
-/// - `weights`: [num_elements] f32 — attention weights
-/// - `compressed`: quantized values [num_elements]
+/// - `weights`: \[num_elements\] f32 — attention weights
+/// - `compressed`: quantized values \[num_elements\]
 ///
 /// Returns the weighted sum (scalar).
 pub fn quantized_dot(weights: &[f32], compressed: &CompressedValues) -> Result<f32> {

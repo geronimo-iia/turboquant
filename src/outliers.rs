@@ -47,7 +47,7 @@ pub fn detect_outliers(
     Ok(indices)
 }
 
-/// Build an outlier mask from indices. mask[i] = true if i is an outlier.
+/// Build an outlier mask from indices. mask\[i\] = true if i is an outlier.
 pub fn outlier_mask(indices: &[u8], head_dim: usize) -> Vec<bool> {
     let mut mask = vec![false; head_dim];
     for &idx in indices {

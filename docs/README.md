@@ -14,7 +14,7 @@ Architecture and implementation decisions.
 
 | Document                                       | What it covers                                                  |
 | ---------------------------------------------- | --------------------------------------------------------------- |
-| [design/algorithms.md](design/algorithms.md)   | 7 algorithms extracted from QJL reference, Rust data structures |
+| [design/algorithms.md](design/algorithms.md)   | 8 algorithms: QJL projection through Lloyd-Max codebook          |
 | [design/persistence.md](design/persistence.md) | Two-store file format, mmap loading, compaction                 |
 | [design/store.md](design/store.md)             | Store API usage, lifecycle, error handling, crash safety        |
 | [design/benchmarks.md](design/benchmarks.md)   | Benchmark suite, baseline results, optimization targets         |

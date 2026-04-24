@@ -1,4 +1,6 @@
+pub mod codebook;
 pub mod error;
+pub mod math;
 pub mod outliers;
 pub mod quantize;
 pub mod quantizer;

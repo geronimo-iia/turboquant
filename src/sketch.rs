@@ -123,7 +123,7 @@ fn transpose(data: &[f32], rows: usize, cols: usize) -> Vec<f32> {
 }
 
 /// Compute the matrix-vector product: result = mat @ vec.
-/// mat is [rows, cols] row-major, vec is [cols].
+/// mat is \[rows, cols\] row-major, vec is \[cols\].
 #[allow(clippy::needless_range_loop)]
 pub fn matvec(mat: &[f32], rows: usize, cols: usize, vec: &[f32]) -> Vec<f32> {
     assert_eq!(mat.len(), rows * cols);

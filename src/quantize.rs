@@ -5,15 +5,15 @@ use crate::sketch::{l2_norm, QJLSketch};
 /// Compressed key vectors — packed sign bits with outlier separation.
 #[derive(Clone, Debug)]
 pub struct CompressedKeys {
-    /// Packed sign bits for inlier dimensions [num_vectors, sketch_dim/8].
+    /// Packed sign bits for inlier dimensions \[num_vectors, sketch_dim/8\].
     pub key_quant: Vec<u8>,
-    /// Packed sign bits for outlier dimensions [num_vectors, outlier_sketch_dim/8].
+    /// Packed sign bits for outlier dimensions \[num_vectors, outlier_sketch_dim/8\].
     pub key_outlier_quant: Vec<u8>,
-    /// L2 norm of each full vector [num_vectors].
+    /// L2 norm of each full vector \[num_vectors\].
     pub key_norms: Vec<f32>,
-    /// L2 norm of outlier components [num_vectors].
+    /// L2 norm of outlier components \[num_vectors\].
     pub outlier_norms: Vec<f32>,
-    /// Outlier dimension indices for this group [outlier_count].
+    /// Outlier dimension indices for this group \[outlier_count\].
     pub outlier_indices: Vec<u8>,
     /// Number of vectors.
     pub num_vectors: usize,

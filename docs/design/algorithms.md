@@ -12,7 +12,9 @@ src/
 ├── quantize.rs     CompressedKeys — sign hashing, bit-packing
 ├── score.rs        score — signed dot, outlier sketch subtraction
 ├── values.rs       CompressedValues — min-max quantization, fused matmul
-└── quantizer.rs    KeyQuantizer — batch + streaming wrapper
+├── quantizer.rs    KeyQuantizer — batch + streaming wrapper
+├── math.rs         Numerical helpers — lgamma, beta_pdf, normal_icdf, Simpson's rule
+└── codebook.rs     Codebook — Lloyd-Max optimal scalar quantization
 ```
 
 ## Algorithm 1: Random Projection Matrix
@@ -208,7 +210,48 @@ Algorithm:
     acc += weights[i] * float_val
 ```
 
-## Algorithm 7: Streaming Quantizer
+## Algorithm 7: Lloyd-Max Codebook Generation
+
+Source: Lloyd 1982 / Max 1960 (textbook optimal scalar quantization).
+Impl: `src/codebook.rs` → `generate_codebook`, `src/math.rs` → helpers.
+
+Generates an optimal scalar quantization codebook for the coordinate
+marginal distribution of a d-dimensional unit-sphere-uniform vector.
+
+```
+Input:
+  dim        = vector dimension (determines the marginal distribution)
+  bit_width  = bits per scalar (1..=8, giving 2^bit_width levels)
+  iterations = max Lloyd-Max iterations (typically 50–100)
+
+Output:
+  centroids  : [2^bit_width] f32  — reconstruction values
+  boundaries : [2^bit_width - 1] f32  — decision thresholds
+
+Algorithm:
+  1. Initialize centroids via quantile spacing of Beta(1/2, (d-1)/2):
+       c_i = F⁻¹((i + 0.5) / k)  for i in 0..k, where k = 2^bit_width
+  2. Lloyd-Max iterations (until convergence or max iterations):
+     a. Update boundaries as midpoints:
+          b_i = (c_i + c_{i+1}) / 2
+     b. Update centroids as conditional means:
+          c_i = E[X | b_{i-1} ≤ X < b_i]
+        computed via Simpson's rule numerical integration
+     c. Stop when max |c_new - c_old| < 1e-12
+  3. Final boundaries recomputed from converged centroids
+
+Marginal PDF:
+  f(x) = C_d · (1 - x²)^((d-3)/2)  for |x| < 1, d ≤ 50
+  f(x) ≈ N(0, 1/d)                   for d > 50
+```
+
+Computation is done in f64 for numerical stability; the returned
+codebook stores f32 centroids and boundaries.
+
+`CodebookCache` memoizes codebooks by (dim, bit_width) to avoid
+recomputation.
+
+## Algorithm 8: Streaming Quantizer
 
 Source: `QJLKeyQuantizer.update_sketch` in `llama3_utils_qjl.py`
 Impl: `src/quantizer.rs` → `KeyQuantizer`
@@ -254,6 +297,13 @@ pub struct CompressedKeys {
     pub outlier_indices: Vec<u8>,     // [outlier_count] per group
     pub num_vectors: usize,
     pub head_dim: usize,
+}
+
+// src/codebook.rs
+pub struct Codebook {
+    pub centroids: Vec<f32>,          // [2^bit_width] reconstruction values
+    pub boundaries: Vec<f32>,         // [2^bit_width - 1] decision thresholds
+    pub bit_width: u8,                // 1..=8
 }
 
 // src/values.rs

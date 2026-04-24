@@ -17,6 +17,10 @@ pub enum QjlError {
     StoreVersionMismatch { expected: u16, got: u16 },
     /// Outlier index out of range.
     OutlierIndexOutOfRange { index: u8, head_dim: usize },
+    /// Codebook bit width is invalid (must be 1..=8).
+    InvalidCodebookBitWidth(u8),
+    /// Dimension is invalid (must be > 0).
+    InvalidDimension(usize),
     /// I/O error from the underlying filesystem.
     Io(std::io::Error),
 }
@@ -53,6 +57,12 @@ impl fmt::Display for QjlError {
                     f,
                     "outlier index {index} out of range for head_dim {head_dim}"
                 )
+            }
+            Self::InvalidCodebookBitWidth(bits) => {
+                write!(f, "invalid codebook bit width: {bits} (must be 1..=8)")
+            }
+            Self::InvalidDimension(dim) => {
+                write!(f, "invalid dimension: {dim} (must be > 0)")
             }
             Self::Io(e) => write!(f, "I/O error: {e}"),
         }
@@ -115,6 +125,8 @@ mod tests {
                 index: 200,
                 head_dim: 128,
             },
+            QjlError::InvalidCodebookBitWidth(0),
+            QjlError::InvalidDimension(0),
             QjlError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "gone")),
         ];
         for v in &variants {

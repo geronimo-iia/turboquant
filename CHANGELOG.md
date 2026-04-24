@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] — TBD
+## [0.3.0] — TBD
+
+### Added
+
+- `codebook` module — Lloyd-Max optimal scalar quantization codebook
+  for the Beta(1/2, (d-1)/2) coordinate marginal of unit-sphere vectors
+  - `Codebook` struct with `quantize` / `dequantize` (f32 storage)
+  - `generate_codebook(dim, bit_width, iterations)` — 1–8 bit support
+  - `CodebookCache` — memoizing cache keyed by (dim, bit_width)
+- `math` module — numerical helpers (all f64 internals)
+  - `lgamma` — Lanczos approximation
+  - `beta_pdf` — coordinate marginal PDF with Gaussian path for dim > 50
+  - `normal_icdf` — Beasley-Springer-Moro rational approximation
+  - `sample_beta_marginal` — inverse CDF via bisection / Gaussian
+  - `simpson_integrate` — paired Simpson's rule
+- `QjlError::InvalidCodebookBitWidth` and `QjlError::InvalidDimension` variants
+- `THIRD_PARTY_NOTICES` file (TurboQuant MIT attribution)
+- 30 new tests (14 codebook + 12 math + 4 error)
+
+### Fixed
+
+- 15 rustdoc `broken_intra_doc_links` warnings across existing modules
+  (escaped `[brackets]` in doc comments)
+
+## [0.2.0] — 2025-07-23
 
 **Breaking change:** all public functions now return `Result<T, QjlError>`
 instead of panicking on invalid input.
