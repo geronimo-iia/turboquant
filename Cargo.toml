@@ -1,6 +1,6 @@
 [package]
 name = "qjl-sketch"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.95"
 description = "QJL sign-based vector compression and scoring with near-optimal distortion rate"
@@ -10,8 +10,8 @@ repository = "https://github.com/geronimo-iia/qjl-sketch"
 homepage = "https://github.com/geronimo-iia/qjl-sketch"
 documentation = "https://github.com/geronimo-iia/qjl-sketch#readme"
 readme = "README.md"
-keywords = ["quantization", "vector", "compression", "attention", "search"]
-categories = ["algorithms", "science", "compression"]
+keywords = ["quantization", "vector", "compression", "gpu", "search"]
+categories = ["algorithms", "science", "compression", "graphics"]
 exclude = [".github/", "tests/", "docs/"]
 
 [lib]
@@ -28,6 +28,9 @@ rayon = "1.10"
 memmap2 = "0.9"
 blake3 = "1.5"
 serde = { version = "1", features = ["derive"], optional = true }
+wgpu = { version = "29", optional = true }
+pollster = { version = "0.4", optional = true }
+log = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
@@ -38,6 +41,7 @@ serde_json = "1"
 [features]
 default = []
 serde = ["dep:serde"]
+gpu = ["dep:wgpu", "dep:pollster"]
 
 [[bench]]
 name = "score"
@@ -50,6 +54,11 @@ harness = false
 [[bench]]
 name = "store"
 harness = false
+
+[[bench]]
+name = "gpu_score"
+harness = false
+required-features = ["gpu"]
 
 [[example]]
 name = "basic_qjl"

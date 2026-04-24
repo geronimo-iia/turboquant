@@ -161,6 +161,31 @@ impl QJLSketch {
         }
         validate_compressed_pair(a, b)?;
 
+        // GPU dispatch for large batches
+        #[cfg(feature = "gpu")]
+        if a.num_vectors >= crate::gpu::gpu_min_batch_compressed() {
+            if let Some(gpu) = crate::gpu::GpuContext::get() {
+                return Ok(gpu.score_compressed_batch(
+                    &a.key_quant,
+                    &b.key_quant,
+                    &a.key_outlier_quant,
+                    &b.key_outlier_quant,
+                    &a.key_norms,
+                    &b.key_norms,
+                    &a.outlier_norms,
+                    &b.outlier_norms,
+                    a.num_vectors,
+                    self.sketch_dim,
+                    self.outlier_sketch_dim,
+                ));
+            }
+        }
+
+        self.score_compressed_cpu(a, b)
+    }
+
+    /// CPU implementation of compressed-vs-compressed scoring.
+    fn score_compressed_cpu(&self, a: &CompressedKeys, b: &CompressedKeys) -> Result<Vec<f32>> {
         let s = self.sketch_dim;
         let os = self.outlier_sketch_dim;
         let ib = s / 8;

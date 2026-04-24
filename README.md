@@ -70,17 +70,31 @@ let scores = store.config.build_sketch().score(&query, &reloaded)?;
 
 ## Performance
 
-Apple M-series, d=128, s=256, 32 vectors/page.
+Apple M3 Max, d=128, s=256, 32 vectors/page.
 
 | Operation                          | Time   |
 | ---------------------------------- | ------ |
-| Score 1 page                       | 18 µs  |
-| Score 100 pages                    | 1.8 ms |
-| Score 1000 pages                   | 18 ms  |
-| Key quantize (per vector)          | 38 µs  |
-| Value quantize 4-bit (per element) | 2.4 ns |
-| Cold start (100 pages)             | 221 µs |
+| Score 1 page (float×sign)          | 26 µs  |
+| Score 100 pages                    | 1.95 ms |
+| Score 1000 pages                   | 19.4 ms |
+| Compressed scoring 1000 pages      | 840 µs |
+| Key quantize (per vector)          | 43 µs  |
+| Value quantize 4-bit (per element) | 2.9 ns |
+| Cold start (100 pages)             | 228 µs |
 | Page lookup                        | 5 ns   |
+
+### GPU scoring (`--features gpu`)
+
+| Vectors | CPU time | GPU time | GPU per-vector |
+| ------- | -------- | -------- | -------------- |
+| 100     | 1.77 µs  | 1.72 ms  | 17.2 µs        |
+| 1,000   | 17.7 µs  | 1.85 ms  | 1.85 µs       |
+| 10,000  | 177 µs   | 2.28 ms  | 0.23 µs       |
+| 100,000 | 1.77 ms  | 3.44 ms  | 0.034 µs      |
+
+GPU overhead is ~1.7 ms. CPU compressed scoring is ~17.7 ns/vector.
+GPU wins above ~100K vectors on Apple M3 Max.
+Run `./scripts/bench.sh --gpu --save` for full results.
 
 ## Quality
 
@@ -125,7 +139,9 @@ Quality improves with larger sketch_dim.
 cargo build                           # debug
 cargo test                            # all tests (default features)
 cargo test --features serde           # include serde round-trip tests
+cargo test --features gpu -- --ignored  # GPU tests (requires adapter)
 cargo bench                           # criterion benchmarks (release)
+cargo bench --bench gpu_score --features gpu  # GPU vs CPU benchmarks
 cargo clippy -- -D warnings           # lint
 cargo run --example serde_roundtrip --features serde
 cargo run --example store_export_import --features serde
@@ -135,9 +151,17 @@ Requires Rust 1.95+.
 
 ### Feature flags
 
-| Flag    | Default | What it enables                                                  |
-| ------- | ------- | ---------------------------------------------------------------- |
-| `serde` | off     | `Serialize`/`Deserialize` on public structs, store export/import |
+| Flag    | Default | What it enables                                                         |
+| ------- | ------- | ----------------------------------------------------------------------- |
+| `serde` | off     | `Serialize`/`Deserialize` on public structs, store export/import        |
+| `gpu`   | off     | WGPU compute shaders for GPU-accelerated scoring (auto-detects adapter) |
+
+### Environment variables
+
+| Variable                       | Default | What it controls                                                    |
+| ------------------------------ | ------- | ------------------------------------------------------------------- |
+| `QJL_GPU_MIN_BATCH`            | 5000    | Float×sign `score()` GPU dispatch threshold. Set to `0` to force GPU. |
+| `QJL_GPU_MIN_BATCH_COMPRESSED` | 100000  | Compressed `score_compressed()` GPU threshold. CPU is ~17 ns/vec.   |
 
 ## License
 

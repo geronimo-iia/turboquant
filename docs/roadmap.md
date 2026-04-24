@@ -23,13 +23,11 @@ and TurboQuant MSE-optimal pipeline. CPU-first, GPU-optional.
 | 10 | MSE-optimal quantization — RandomRotation + Lloyd-Max per-coordinate | 0.4.0 |
 | 11 | Serde support — feature-gated, streaming store export/import | 0.4.0 |
 | 12 | Examples — basic_qjl, compressed_scoring, mse_quantization, serde_roundtrip, store_export_import | 0.4.0 |
+| 13 | GPU acceleration — WGPU compute shader, runtime dispatch, store-level batch scoring | 0.5.0 |
 
-159 tests (with `--features serde`). Published on [crates.io](https://crates.io/crates/qjl-sketch).
+162+ tests (with `--features serde,gpu`). Published on [crates.io](https://crates.io/crates/qjl-sketch).
 
 ## Next
-
-- GPU acceleration (WGPU)
-
 
 ### Full TurboQuant pipeline (`turbo.rs`)
 
@@ -47,10 +45,11 @@ for the design and layering plan.
 - [ ] `rayon` parallelism for multi-page scoring
 - [ ] Batch append (amortize fsync cost)
 
-### GPU acceleration (WGPU)
+### GPU — further optimization
 
-- [ ] WGPU compute shaders for score kernels (single WGSL shader, runs on Vulkan/Metal/DX12)
-- [ ] See [docs/prompts/gpu-acceleration.md](prompts/gpu-acceleration.md)
+- [ ] GPU-accelerated query projection (matrix-vector multiply)
+- [ ] Buffer reuse / pre-allocation across queries
+- [ ] Benchmark-calibrated `GPU_MIN_BATCH` per platform
 
 ### Other
 

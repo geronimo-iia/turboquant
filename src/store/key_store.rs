@@ -381,6 +381,37 @@ impl KeyStore {
     pub fn import_entry(&mut self, entry: &KeyExportEntry) -> Result<()> {
         self.append(entry.slug_hash, entry.content_hash, &entry.compressed)
     }
+
+    /// Score a query against all pages using compressed-vs-compressed scoring.
+    ///
+    /// Compresses the query, then scores against every page in the store.
+    /// With the `gpu` feature, large stores dispatch to GPU automatically.
+    /// Returns (slug_hash, scores) pairs.
+    pub fn score_all_pages(
+        &self,
+        query: &[f32],
+        sketch: &crate::sketch::QJLSketch,
+        outlier_indices: &[u8],
+    ) -> Result<Vec<(u64, Vec<f32>)>> {
+        let head_dim = self.config.head_dim as usize;
+        let query_compressed = sketch.quantize(query, 1, outlier_indices)?;
+
+        let mut results = Vec::with_capacity(self.index.len());
+        for entry in &self.index {
+            let page = match self.get_page(entry.slug_hash) {
+                Some(p) => p,
+                None => continue,
+            };
+            let keys = page.to_compressed_keys(head_dim);
+            let mut page_scores = Vec::with_capacity(keys.num_vectors);
+            for j in 0..keys.num_vectors {
+                let s = sketch.score_compressed_pair(&query_compressed, 0, &keys, j)?;
+                page_scores.push(s);
+            }
+            results.push((entry.slug_hash, page_scores));
+        }
+        Ok(results)
+    }
 }
 
 // ── Entry serialization ───────────────────────────────────────────────────────
@@ -780,5 +811,85 @@ mod tests {
         assert!(store.is_fresh(0xAA, 0x22));
         assert!(!store.is_fresh(0xAA, 0x11));
         assert!(store.dead_bytes() > 0);
+    }
+
+    #[test]
+    fn test_score_all_pages() {
+        let dir = tempdir().unwrap();
+        let config = test_config();
+        let mut store = KeyStore::create(dir.path(), config.clone()).unwrap();
+        let sketch = config.build_sketch();
+
+        let mut rng = ChaCha20Rng::seed_from_u64(900);
+        let outlier_indices = vec![0u8];
+        for slug in 0u64..3 {
+            let keys = random_vec(4 * 16, &mut rng);
+            let compressed = sketch.quantize(&keys, 4, &outlier_indices).unwrap();
+            store.append(slug, slug * 100, &compressed).unwrap();
+        }
+
+        let query = random_vec(16, &mut rng);
+        let results = store
+            .score_all_pages(&query, &sketch, &outlier_indices)
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        for (slug_hash, scores) in &results {
+            assert_eq!(scores.len(), 4);
+            for s in scores {
+                assert!(s.is_finite(), "non-finite score for slug {slug_hash}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_score_all_pages_empty_store() {
+        let dir = tempdir().unwrap();
+        let config = test_config();
+        let store = KeyStore::create(dir.path(), config.clone()).unwrap();
+        let sketch = config.build_sketch();
+
+        let mut rng = ChaCha20Rng::seed_from_u64(901);
+        let query = random_vec(16, &mut rng);
+        let results = store.score_all_pages(&query, &sketch, &[0u8]).unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_score_all_pages_matches_per_page() {
+        let dir = tempdir().unwrap();
+        let config = test_config();
+        let mut store = KeyStore::create(dir.path(), config.clone()).unwrap();
+        let sketch = config.build_sketch();
+
+        let mut rng = ChaCha20Rng::seed_from_u64(902);
+        let outlier_indices = vec![0u8];
+        for slug in 0u64..3 {
+            let keys = random_vec(4 * 16, &mut rng);
+            let compressed = sketch.quantize(&keys, 4, &outlier_indices).unwrap();
+            store.append(slug, slug, &compressed).unwrap();
+        }
+
+        let query = random_vec(16, &mut rng);
+        let query_compressed = sketch.quantize(&query, 1, &outlier_indices).unwrap();
+
+        let batch_results = store
+            .score_all_pages(&query, &sketch, &outlier_indices)
+            .unwrap();
+
+        // Compare with per-page scoring
+        for (slug_hash, batch_scores) in &batch_results {
+            let page = store.get_page(*slug_hash).unwrap();
+            let keys = page.to_compressed_keys(16);
+            for (j, &batch_s) in batch_scores.iter().enumerate() {
+                let per_page_s = sketch
+                    .score_compressed_pair(&query_compressed, 0, &keys, j)
+                    .unwrap();
+                assert!(
+                    (batch_s - per_page_s).abs() < 1e-6,
+                    "slug {slug_hash} vec {j}: batch={batch_s}, per_page={per_page_s}"
+                );
+            }
+        }
     }
 }

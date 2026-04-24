@@ -16,7 +16,8 @@ src/
 ├── math.rs         Numerical helpers — lgamma, beta_pdf, normal_icdf, Simpson's rule
 ├── codebook.rs     Codebook — Lloyd-Max optimal scalar quantization
 ├── rotation.rs     RandomRotation — d×d orthogonal decorrelation
-└── mse_quant.rs    MSE-optimal quantization — rotate + Lloyd-Max
+├── mse_quant.rs    MSE-optimal quantization — rotate + Lloyd-Max
+└── gpu/            GPU-accelerated scoring (WGPU, optional)
 ```
 
 ## Algorithm index
@@ -33,6 +34,7 @@ src/
 | 8 | [Compressed Scoring](08-compressed-scoring.md) | `score.rs` | Hamming-based cosine estimator |
 | 9 | [Streaming Quantizer](09-streaming-quantizer.md) | `quantizer.rs` | Batch + one-at-a-time compression |
 | 10 | [MSE Quantization](10-mse-quantization.md) | `rotation.rs`, `mse_quant.rs` | Rotate + Lloyd-Max per-coordinate |
+| 11 | [GPU Scoring](11-gpu-scoring.md) | `gpu/` | WGPU compute shader, runtime dispatch |
 
 ## Cross-cutting
 

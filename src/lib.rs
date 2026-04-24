@@ -1,5 +1,7 @@
 pub mod codebook;
 pub mod error;
+#[cfg(feature = "gpu")]
+pub mod gpu;
 pub mod math;
 pub mod mse_quant;
 pub mod outliers;

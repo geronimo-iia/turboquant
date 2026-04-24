@@ -32,11 +32,20 @@ jobs:
       - name: Clippy
         run: cargo clippy -- -D warnings
 
+      - name: Clippy (gpu feature)
+        run: cargo clippy --features gpu -- -D warnings
+
       - name: Build
         run: cargo build
 
       - name: Test
         run: cargo test
+
+      - name: Test (serde feature)
+        run: cargo test --features serde
+
+      - name: Test (gpu feature, non-adapter tests only)
+        run: cargo test --features gpu
 
       - name: Install cargo-audit
         if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
