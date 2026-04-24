@@ -34,8 +34,7 @@ Default features are empty — both are opt-in.
 
 | Variable | Default | What it controls |
 |----------|---------|------------------|
-| `QJL_GPU_MIN_BATCH` | 5000 | Float×sign `score()` GPU dispatch threshold |
-| `QJL_GPU_MIN_BATCH_COMPRESSED` | 100000 | Compressed `score_compressed()` GPU threshold |
+| `QJL_GPU_MIN_BATCH` | 5000 | Total vectors for `score_all_pages` GPU dispatch |
 
 ## Benchmarks
 
@@ -53,7 +52,7 @@ cargo bench --bench gpu_score --features gpu       # GPU vs CPU
 | Persistence    | [docs/design/persistence.md](docs/design/persistence.md) |
 | Store API      | [docs/design/store.md](docs/design/store.md)       |
 | Serde          | [docs/design/serde.md](docs/design/serde.md)       |
-| Benchmarks     | [docs/design/benchmarks.md](docs/design/benchmarks.md) |
+| Benchmarks     | [docs/benchmarks.md](docs/benchmarks.md)               |
 | Testing        | [docs/design/testing.md](docs/design/testing.md)   |
 | Roadmap        | [docs/roadmap.md](docs/roadmap.md)                 |
 | Release guide  | [docs/release.md](docs/release.md)                 |

@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn test_error_source() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "oops");
+        let io_err = std::io::Error::other("oops");
         let qjl_err = QjlError::Io(io_err);
         assert!(std::error::Error::source(&qjl_err).is_some());
 

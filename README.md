@@ -68,34 +68,6 @@ let reloaded = page.to_compressed_keys(128);
 let scores = store.config.build_sketch().score(&query, &reloaded)?;
 ```
 
-## Performance
-
-Apple M3 Max, d=128, s=256, 32 vectors/page.
-
-| Operation                          | Time   |
-| ---------------------------------- | ------ |
-| Score 1 page (float×sign)          | 26 µs  |
-| Score 100 pages                    | 1.95 ms |
-| Score 1000 pages                   | 19.4 ms |
-| Compressed scoring 1000 pages      | 840 µs |
-| Key quantize (per vector)          | 43 µs  |
-| Value quantize 4-bit (per element) | 2.9 ns |
-| Cold start (100 pages)             | 228 µs |
-| Page lookup                        | 5 ns   |
-
-### GPU scoring (`--features gpu`)
-
-| Vectors | CPU time | GPU time | GPU per-vector |
-| ------- | -------- | -------- | -------------- |
-| 100     | 1.77 µs  | 1.72 ms  | 17.2 µs        |
-| 1,000   | 17.7 µs  | 1.85 ms  | 1.85 µs       |
-| 10,000  | 177 µs   | 2.28 ms  | 0.23 µs       |
-| 100,000 | 1.77 ms  | 3.44 ms  | 0.034 µs      |
-
-GPU overhead is ~1.7 ms. CPU compressed scoring is ~17.7 ns/vector.
-GPU wins above ~100K vectors on Apple M3 Max.
-Run `./scripts/bench.sh --gpu --save` for full results.
-
 ## Quality
 
 Measured over 10K+ random vector pairs (d=64–128, s=64–512).
@@ -112,16 +84,52 @@ Quality improves with larger sketch_dim.
 
 ## Documentation
 
-| Document                                                    | What it covers                        |
-| ----------------------------------------------------------- | ------------------------------------- |
-| [docs/study.md](docs/study.md)                              | TurboQuant algorithm overview         |
-| [docs/design/algorithms/](docs/design/algorithms/README.md) | Algorithm catalog with pseudocode     |
-| [docs/design/persistence.md](docs/design/persistence.md)    | Two-store file format                 |
-| [docs/design/store.md](docs/design/store.md)                | Store API and lifecycle               |
-| [docs/design/serde.md](docs/design/serde.md)                | Serde support and store export/import |
-| [docs/design/benchmarks.md](docs/design/benchmarks.md)      | Benchmark suite and results           |
-| [docs/design/testing.md](docs/design/testing.md)            | Test strategy                         |
-| [docs/roadmap.md](docs/roadmap.md)                          | Development roadmap                   |
+- [docs/](docs/README.md) — full documentation index
+- [docs/design/](docs/design/README.md) — architecture and design decisions
+- [docs/benchmarks.md](docs/benchmarks.md) — benchmark suite and results
+- [docs/roadmap.md](docs/roadmap.md) — development roadmap
+- [docs/decisions/](docs/decisions/) — architecture decision records
+
+
+## Performance
+
+Apple M3 Max, d=128, s=256, 32 vectors/page.
+
+| Operation                          | Time    |
+| ---------------------------------- | ------- |
+| Score 1 page (64 vec)              | 24 us   |
+| Score 100 pages                    | 1.8 ms  |
+| Score 1000 pages                   | 17.8 ms |
+| Key quantize (per vector)          | 38 us   |
+| Value quantize 4-bit (per element) | 2.7 ns  |
+| Cold start (100 pages)             | 217 us  |
+| Page lookup                        | 5 ns    |
+
+### GPU store scoring (`--features gpu`)
+
+`score_all_pages` batches all vectors into a single GPU dispatch.
+Without GPU, falls back to `sketch.score()` per page.
+
+| Pages | Vectors | CPU (d=128) | GPU (d=128) | Speedup |
+| ----- | ------- | ----------- | ----------- | ------- |
+| 100   | 3,200   | 2.2 ms      | 2.3 ms *    | 1x      |
+| 1000  | 32,000  | 21.8 ms     | 3.3 ms      | **6.6x** |
+| 10000 | 320,000 | 225.8 ms    | 15.5 ms     | **14.6x** |
+
+\* Below `QJL_GPU_MIN_BATCH` (5K vectors), auto-dispatch uses CPU.
+Higher dimensions benefit more: d=64 sees 7x at 10K pages, d=128 sees 14.6x.
+
+GPU is beneficial when:
+1. Total vectors across all pages >= 5000 for d=64 (default threshold) or pages >= 3000 for d=128
+2. Higher vector dimensions (d=128+) see larger speedups
+3. The store has many pages (1000+)
+
+GPU is NOT beneficial when:
+- Few pages (< ~150 pages at 32 vec/page = 4800 vectors)
+- The auto-dispatch correctly falls back to CPU in these cases
+
+See [docs/benchmarks.md](docs/benchmarks.md) for full results.
+
 
 ## Examples
 
@@ -158,10 +166,9 @@ Requires Rust 1.95+.
 
 ### Environment variables
 
-| Variable                       | Default | What it controls                                                    |
-| ------------------------------ | ------- | ------------------------------------------------------------------- |
-| `QJL_GPU_MIN_BATCH`            | 5000    | Float×sign `score()` GPU dispatch threshold. Set to `0` to force GPU. |
-| `QJL_GPU_MIN_BATCH_COMPRESSED` | 100000  | Compressed `score_compressed()` GPU threshold. CPU is ~17 ns/vec.   |
+| Variable            | Default | What it controls                                                           |
+| ------------------- | ------- | -------------------------------------------------------------------------- |
+| `QJL_GPU_MIN_BATCH` | 5000    | Total vectors for `score_all_pages` GPU dispatch. Set to `0` to force GPU. |
 
 ## License
 

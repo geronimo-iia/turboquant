@@ -180,6 +180,33 @@ shared lock, writers (append/compact) take exclusive lock.
 
 See [persistence.md](persistence.md) for the binary format specification.
 
+## Store-Level Scoring
+
+```rust
+// Score a query against all pages (float x sign)
+let results = key_store.score_all_pages(&query, &sketch, &outlier_indices)?;
+// Returns Vec<(slug_hash, Vec<f32>)>
+
+// With `gpu` feature: batches all vectors into single GPU dispatch
+// Without GPU: sketch.score() per page on CPU
+```
+
+See [algorithms/11-gpu-scoring.md](algorithms/11-gpu-scoring.md).
+
+## Export / Import (`serde` feature)
+
+```rust
+// Streaming export
+for entry in key_store.iter_pages() {
+    serde_json::to_writer(&mut file, &entry)?;
+}
+
+// Streaming import
+key_store.import_entry(&entry)?;
+```
+
+See [serde.md](serde.md).
+
 ## Dependencies
 
 | Crate | Used for |

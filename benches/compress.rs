@@ -1,10 +1,11 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use qjl_sketch::outliers::detect_outliers;
 use qjl_sketch::sketch::QJLSketch;
 use qjl_sketch::values::quantize_values;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use rand_distr::{Distribution, StandardNormal};
+use std::hint::black_box;
 
 fn random_vec(d: usize, rng: &mut ChaCha20Rng) -> Vec<f32> {
     let normal: StandardNormal = StandardNormal;

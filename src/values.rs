@@ -188,7 +188,7 @@ mod tests {
         for word in &compressed.packed {
             for slot in 0..feat_per_int {
                 let q = (word >> (slot * 4)) & mask;
-                assert!(q >= 0 && q <= 15, "4-bit value out of range: {q}");
+                assert!((0..=15).contains(&q), "4-bit value out of range: {q}");
             }
         }
     }
@@ -202,7 +202,7 @@ mod tests {
         for word in &compressed.packed {
             for slot in 0..feat_per_int {
                 let q = (word >> (slot * 2)) & mask;
-                assert!(q >= 0 && q <= 3, "2-bit value out of range: {q}");
+                assert!((0..=3).contains(&q), "2-bit value out of range: {q}");
             }
         }
     }

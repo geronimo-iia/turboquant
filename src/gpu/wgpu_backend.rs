@@ -1,12 +1,12 @@
 use std::sync::OnceLock;
 use wgpu::util::DeviceExt;
 
-/// Lazily-initialized GPU context. Created once, reused across calls.
+/// Lazily-initialized GPU context with float×sign compute pipeline.
 pub struct GpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    score_pipeline: wgpu::ComputePipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
+    float_sign_pipeline: wgpu::ComputePipeline,
+    float_sign_layout: wgpu::BindGroupLayout,
 }
 
 static GPU_CONTEXT: OnceLock<Option<GpuContext>> = OnceLock::new();
@@ -47,44 +47,18 @@ impl GpuContext {
             };
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("score_compressed"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("score.wgsl").into()),
+            label: Some("score_float_sign"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("score_float_sign.wgsl").into()),
         });
-
-        // 7 bindings: 1 uniform + 5 storage(read) + 1 storage(rw)
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("score_compressed_layout"),
-            entries: &[
-                bgl_entry(0, wgpu::BufferBindingType::Uniform),
-                bgl_entry(1, wgpu::BufferBindingType::Storage { read_only: true }),
-                bgl_entry(2, wgpu::BufferBindingType::Storage { read_only: true }),
-                bgl_entry(3, wgpu::BufferBindingType::Storage { read_only: true }),
-                bgl_entry(4, wgpu::BufferBindingType::Storage { read_only: true }),
-                bgl_entry(5, wgpu::BufferBindingType::Storage { read_only: true }),
-                bgl_entry(6, wgpu::BufferBindingType::Storage { read_only: false }),
-            ],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("score_compressed_pipeline_layout"),
-            bind_group_layouts: &[Some(&bind_group_layout)],
-            immediate_size: 0,
-        });
-
-        let score_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("score_compressed_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let float_sign_layout = create_layout(&device, "float_sign", 7);
+        let float_sign_pipeline =
+            create_pipeline(&device, "float_sign", &float_sign_layout, &shader);
 
         Some(Self {
             device,
             queue,
-            score_pipeline,
-            bind_group_layout,
+            float_sign_pipeline,
+            float_sign_layout,
         })
     }
 
@@ -93,74 +67,87 @@ impl GpuContext {
         GPU_CONTEXT.get_or_init(GpuContext::try_init).as_ref()
     }
 
-    /// Score compressed vectors on GPU.
+    /// Score a query against compressed keys on GPU (float×sign).
     #[allow(clippy::too_many_arguments)]
-    pub fn score_compressed_batch(
+    pub fn score_float_sign_batch(
         &self,
-        a_inlier_bytes: &[u8],
-        b_inlier_bytes: &[u8],
-        a_outlier_bytes: &[u8],
-        b_outlier_bytes: &[u8],
-        a_norms: &[f32],
-        b_norms: &[f32],
-        a_outlier_norms: &[f32],
-        b_outlier_norms: &[f32],
-        num_pairs: usize,
+        q_inlier_sketch: &[f32],
+        q_outlier_sketch: &[f32],
+        key_quant: &[u8],
+        key_outlier_quant: &[u8],
+        key_norms: &[f32],
+        outlier_norms: &[f32],
+        num_vectors: usize,
         sketch_dim: usize,
         outlier_sketch_dim: usize,
+        scale: f32,
+        scale_outlier: f32,
     ) -> Vec<f32> {
-        if num_pairs == 0 {
+        if num_vectors == 0 {
             return Vec::new();
         }
 
-        let inlier_words_per_vec = sketch_dim / 32;
-        let outlier_words_per_vec = outlier_sketch_dim / 32;
+        let inlier_words = sketch_dim / 32;
+        let outlier_words = outlier_sketch_dim / 32;
 
-        let a_inlier_u32 = pack_bytes_to_u32(a_inlier_bytes);
-        let b_inlier_u32 = pack_bytes_to_u32(b_inlier_bytes);
-        let a_outlier_u32 = pack_bytes_to_u32(a_outlier_bytes);
-        let b_outlier_u32 = pack_bytes_to_u32(b_outlier_bytes);
-
-        // Pack norms: [a_norm, a_out_norm, b_norm, b_out_norm] × num_pairs
-        let mut packed_norms = Vec::with_capacity(num_pairs * 4);
-        for i in 0..num_pairs {
-            packed_norms.push(a_norms[i]);
-            packed_norms.push(a_outlier_norms[i]);
-            packed_norms.push(b_norms[i]);
-            packed_norms.push(b_outlier_norms[i]);
+        // Pack norms: [key_norm, outlier_norm] x num_vectors
+        let mut packed_norms = Vec::with_capacity(num_vectors * 2);
+        for i in 0..num_vectors {
+            packed_norms.push(key_norms[i]);
+            packed_norms.push(outlier_norms[i]);
         }
 
-        let params = [
+        // Params: 5 u32 + 2 f32, padded to 32 bytes
+        let params_u32: [u32; 8] = [
             sketch_dim as u32,
             outlier_sketch_dim as u32,
-            inlier_words_per_vec as u32,
-            outlier_words_per_vec as u32,
-            num_pairs as u32,
-            0,
-            0,
+            inlier_words as u32,
+            outlier_words as u32,
+            num_vectors as u32,
+            scale.to_bits(),
+            scale_outlier.to_bits(),
             0,
         ];
 
-        let params_buf = self.create_buffer_init("params", bytemuck::cast_slice(&params), true);
-        let a_inlier_buf =
-            self.create_buffer_init("a_inlier", bytemuck::cast_slice(&a_inlier_u32), false);
-        let b_inlier_buf =
-            self.create_buffer_init("b_inlier", bytemuck::cast_slice(&b_inlier_u32), false);
-        let a_outlier_buf =
-            self.create_buffer_init("a_outlier", bytemuck::cast_slice(&a_outlier_u32), false);
-        let b_outlier_buf =
-            self.create_buffer_init("b_outlier", bytemuck::cast_slice(&b_outlier_u32), false);
-        let norms_buf =
-            self.create_buffer_init("norms", bytemuck::cast_slice(&packed_norms), false);
+        let buffers = [
+            self.create_buf("params", bytemuck::cast_slice(&params_u32), true),
+            self.create_buf("q_inlier", bytemuck::cast_slice(q_inlier_sketch), false),
+            self.create_buf("q_outlier", bytemuck::cast_slice(q_outlier_sketch), false),
+            self.create_buf(
+                "key_quant",
+                bytemuck::cast_slice(&pack_bytes_to_u32(key_quant)),
+                false,
+            ),
+            self.create_buf(
+                "key_outlier",
+                bytemuck::cast_slice(&pack_bytes_to_u32(key_outlier_quant)),
+                false,
+            ),
+            self.create_buf("norms", bytemuck::cast_slice(&packed_norms), false),
+        ];
 
-        let scores_size = (num_pairs * 4) as u64;
+        self.dispatch(
+            &self.float_sign_pipeline,
+            &self.float_sign_layout,
+            &buffers,
+            num_vectors,
+        )
+    }
+
+    fn dispatch(
+        &self,
+        pipeline: &wgpu::ComputePipeline,
+        layout: &wgpu::BindGroupLayout,
+        input_buffers: &[wgpu::Buffer],
+        num_items: usize,
+    ) -> Vec<f32> {
+        let scores_size = (num_items * 4) as u64;
         let scores_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scores"),
             size: scores_size,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
-
         let readback_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback"),
             size: scores_size,
@@ -168,36 +155,33 @@ impl GpuContext {
             mapped_at_creation: false,
         });
 
+        let mut entries: Vec<wgpu::BindGroupEntry<'_>> = input_buffers
+            .iter()
+            .enumerate()
+            .map(|(i, buf)| bg_entry(i as u32, buf))
+            .collect();
+        entries.push(bg_entry(input_buffers.len() as u32, &scores_buf));
+
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("score_bind_group"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                bg_entry(0, &params_buf),
-                bg_entry(1, &a_inlier_buf),
-                bg_entry(2, &b_inlier_buf),
-                bg_entry(3, &a_outlier_buf),
-                bg_entry(4, &b_outlier_buf),
-                bg_entry(5, &norms_buf),
-                bg_entry(6, &scores_buf),
-            ],
+            label: Some("bind_group"),
+            layout,
+            entries: &entries,
         });
 
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("score_encoder"),
+                label: Some("encoder"),
             });
-
         {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("score_pass"),
+                label: Some("pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.score_pipeline);
+            pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups((num_pairs as u32).div_ceil(64), 1, 1);
+            pass.dispatch_workgroups((num_items as u32).div_ceil(64), 1, 1);
         }
-
         encoder.copy_buffer_to_buffer(&scores_buf, 0, &readback_buf, 0, scores_size);
         self.queue.submit(Some(encoder.finish()));
 
@@ -218,11 +202,10 @@ impl GpuContext {
         let scores: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
         drop(data);
         readback_buf.unmap();
-
         scores
     }
 
-    fn create_buffer_init(&self, label: &str, data: &[u8], uniform: bool) -> wgpu::Buffer {
+    fn create_buf(&self, label: &str, data: &[u8], uniform: bool) -> wgpu::Buffer {
         let usage = if uniform {
             wgpu::BufferUsages::UNIFORM
         } else {
@@ -235,6 +218,46 @@ impl GpuContext {
                 usage,
             })
     }
+}
+
+fn create_layout(device: &wgpu::Device, label: &str, num_bindings: u32) -> wgpu::BindGroupLayout {
+    let mut entries = Vec::with_capacity(num_bindings as usize);
+    entries.push(bgl_entry(0, wgpu::BufferBindingType::Uniform));
+    for i in 1..num_bindings - 1 {
+        entries.push(bgl_entry(
+            i,
+            wgpu::BufferBindingType::Storage { read_only: true },
+        ));
+    }
+    entries.push(bgl_entry(
+        num_bindings - 1,
+        wgpu::BufferBindingType::Storage { read_only: false },
+    ));
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some(label),
+        entries: &entries,
+    })
+}
+
+fn create_pipeline(
+    device: &wgpu::Device,
+    label: &str,
+    layout: &wgpu::BindGroupLayout,
+    shader: &wgpu::ShaderModule,
+) -> wgpu::ComputePipeline {
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(label),
+        bind_group_layouts: &[Some(layout)],
+        immediate_size: 0,
+    });
+    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some(label),
+        layout: Some(&pipeline_layout),
+        module: shader,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    })
 }
 
 fn pack_bytes_to_u32(bytes: &[u8]) -> Vec<u32> {
@@ -280,80 +303,81 @@ mod tests {
 
     #[test]
     #[ignore] // requires GPU adapter
-    fn gpu_score_matches_cpu() {
-        use crate::score::hamming_similarity;
+    fn gpu_float_sign_score_matches_cpu() {
+        use crate::sketch::QJLSketch;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha20Rng;
+        use rand_distr::{Distribution, StandardNormal};
 
         let ctx = GpuContext::try_init().expect("no GPU adapter");
-        let sketch_dim = 256usize;
-        let outlier_sketch_dim = 64usize;
-        let num_pairs = 100;
-        let inlier_bytes = sketch_dim / 8;
-        let outlier_bytes = outlier_sketch_dim / 8;
+        let d = 64;
+        let s = 256;
+        let os = 64;
+        let sketch = QJLSketch::new(d, s, os, 42).unwrap();
+        let mut rng = ChaCha20Rng::seed_from_u64(123);
+        let normal: StandardNormal = StandardNormal;
 
-        let mut a_inlier = vec![0u8; num_pairs * inlier_bytes];
-        let mut b_inlier = vec![0u8; num_pairs * inlier_bytes];
-        let mut a_outlier = vec![0u8; num_pairs * outlier_bytes];
-        let mut b_outlier = vec![0u8; num_pairs * outlier_bytes];
-        let mut a_norms = vec![0.0f32; num_pairs];
-        let mut b_norms = vec![0.0f32; num_pairs];
-        let mut a_out_norms = vec![0.0f32; num_pairs];
-        let mut b_out_norms = vec![0.0f32; num_pairs];
+        let query: Vec<f32> = (0..d)
+            .map(|_| {
+                let v: f64 = normal.sample(&mut rng);
+                v as f32
+            })
+            .collect();
+        let num_vectors = 100;
+        let keys: Vec<f32> = (0..num_vectors * d)
+            .map(|_| {
+                let v: f64 = normal.sample(&mut rng);
+                v as f32
+            })
+            .collect();
 
-        for i in 0..num_pairs {
-            a_norms[i] = 1.0 + (i as f32) * 0.01;
-            b_norms[i] = 1.0 + (i as f32) * 0.02;
-            a_out_norms[i] = 0.1 + (i as f32) * 0.001;
-            b_out_norms[i] = 0.1 + (i as f32) * 0.002;
-            for j in 0..inlier_bytes {
-                a_inlier[i * inlier_bytes + j] = ((i + j) % 256) as u8;
-                b_inlier[i * inlier_bytes + j] = ((i + j + 1) % 256) as u8;
-            }
-            for j in 0..outlier_bytes {
-                a_outlier[i * outlier_bytes + j] = ((i * 3 + j) % 256) as u8;
-                b_outlier[i * outlier_bytes + j] = ((i * 3 + j + 2) % 256) as u8;
+        let outlier_indices = vec![0u8];
+        let compressed = sketch
+            .quantize(&keys, num_vectors, &outlier_indices)
+            .unwrap();
+
+        // CPU scores
+        let cpu_scores = sketch.score(&query, &compressed).unwrap();
+
+        // GPU: compute query sketches on CPU (same as score() does)
+        let q_sketch = crate::sketch::matvec(&sketch.proj_dir_quant, s, d, &query);
+        let mut q_outlier_sketch = vec![0.0f32; s];
+        for &idx in &compressed.outlier_indices {
+            let j = idx as usize;
+            let row_start = j * s;
+            for (p, qos) in q_outlier_sketch.iter_mut().enumerate().take(s) {
+                *qos += query[j] * sketch.proj_dir_score[row_start + p];
             }
         }
+        let q_inlier_sketch: Vec<f32> = q_sketch
+            .iter()
+            .zip(q_outlier_sketch.iter())
+            .map(|(f, o)| f - o)
+            .collect();
 
-        let gpu_scores = ctx.score_compressed_batch(
-            &a_inlier,
-            &b_inlier,
-            &a_outlier,
-            &b_outlier,
-            &a_norms,
-            &b_norms,
-            &a_out_norms,
-            &b_out_norms,
-            num_pairs,
-            sketch_dim,
-            outlier_sketch_dim,
+        let scale = (std::f32::consts::FRAC_PI_2).sqrt() / s as f32;
+        let scale_outlier = (std::f32::consts::FRAC_PI_2).sqrt() / os as f32;
+
+        let gpu_scores = ctx.score_float_sign_batch(
+            &q_inlier_sketch,
+            &q_outlier_sketch[..os],
+            &compressed.key_quant,
+            &compressed.key_outlier_quant,
+            &compressed.key_norms,
+            &compressed.outlier_norms,
+            num_vectors,
+            s,
+            os,
+            scale,
+            scale_outlier,
         );
 
-        for i in 0..num_pairs {
-            let ai = &a_inlier[i * inlier_bytes..(i + 1) * inlier_bytes];
-            let bi = &b_inlier[i * inlier_bytes..(i + 1) * inlier_bytes];
-            let ao = &a_outlier[i * outlier_bytes..(i + 1) * outlier_bytes];
-            let bo = &b_outlier[i * outlier_bytes..(i + 1) * outlier_bytes];
-
-            let sim_inlier = hamming_similarity(ai, bi, sketch_dim);
-            let cos_inlier = (std::f32::consts::PI * (1.0 - sim_inlier)).cos();
-            let in_a = (a_norms[i] * a_norms[i] - a_out_norms[i] * a_out_norms[i])
-                .max(0.0)
-                .sqrt();
-            let in_b = (b_norms[i] * b_norms[i] - b_out_norms[i] * b_out_norms[i])
-                .max(0.0)
-                .sqrt();
-
-            let sim_outlier = hamming_similarity(ao, bo, outlier_sketch_dim);
-            let cos_outlier = (std::f32::consts::PI * (1.0 - sim_outlier)).cos();
-
-            let cpu_score =
-                in_a * in_b * cos_inlier + a_out_norms[i] * b_out_norms[i] * cos_outlier;
-
+        for i in 0..num_vectors {
             assert!(
-                (gpu_scores[i] - cpu_score).abs() < 1e-3,
-                "pair {i}: gpu={}, cpu={cpu_score}, diff={}",
+                (gpu_scores[i] - cpu_scores[i]).abs() < 1e-2,
+                "vec {i}: gpu={}, cpu={}",
                 gpu_scores[i],
-                (gpu_scores[i] - cpu_score).abs()
+                cpu_scores[i]
             );
         }
     }
@@ -362,7 +386,7 @@ mod tests {
     #[ignore] // requires GPU adapter
     fn gpu_score_empty_input() {
         let ctx = GpuContext::try_init().expect("no GPU adapter");
-        let scores = ctx.score_compressed_batch(&[], &[], &[], &[], &[], &[], &[], &[], 0, 256, 64);
+        let scores = ctx.score_float_sign_batch(&[], &[], &[], &[], &[], &[], 0, 256, 64, 0.0, 0.0);
         assert!(scores.is_empty());
     }
 }

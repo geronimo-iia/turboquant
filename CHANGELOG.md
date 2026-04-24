@@ -11,16 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `gpu` feature flag — WGPU-based GPU acceleration for compressed scoring
-  - WGSL compute shader for Hamming cosine estimation (XOR + countOneBits)
+- `gpu` feature flag — WGPU-based GPU acceleration for store-level scoring
+  - Float×sign compute shader (`score_float_sign.wgsl`)
   - `GpuContext` — lazy singleton with runtime adapter detection
-  - Transparent dispatch: `score_compressed` auto-routes to GPU for
-    large batches, falls back to CPU silently
-  - `QJL_GPU_MIN_BATCH` env var for float×sign threshold (default 5000)
-  - `QJL_GPU_MIN_BATCH_COMPRESSED` env var for compressed threshold (default 100000)
-  - `KeyStore::score_all_pages` — score a query against all pages
-  - 3 GPU tests (`#[ignore]` — require GPU adapter)
-  - `benches/gpu_score.rs` — CPU vs GPU benchmark
+  - `KeyStore::score_all_pages` batches all vectors across all pages
+    into a single GPU dispatch; falls back to CPU compressed path
+    when GPU unavailable or below threshold
+  - Individual `score()` and `score_compressed()` always use CPU
+  - `QJL_GPU_MIN_BATCH` env var for `score_all_pages` GPU threshold (default 5000)
+  - 5 GPU tests (`#[ignore]` — require GPU adapter)
+  - `benches/gpu_score.rs` — CPU baseline vs GPU benchmarks
   - `scripts/bench.sh` — benchmark runner with report collection
 - `log` crate for structured logging (GPU fallback warnings)
 

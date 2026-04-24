@@ -382,10 +382,13 @@ impl KeyStore {
         self.append(entry.slug_hash, entry.content_hash, &entry.compressed)
     }
 
-    /// Score a query against all pages using compressed-vs-compressed scoring.
+    /// Score a query against all pages using float x sign scoring.
     ///
-    /// Compresses the query, then scores against every page in the store.
-    /// With the `gpu` feature, large stores dispatch to GPU automatically.
+    /// Always uses the float x sign path (same as `sketch.score()`).
+    /// - With `gpu` feature + adapter + enough vectors: single batched
+    ///   GPU dispatch (fast).
+    /// - Without GPU: `sketch.score()` per page on CPU.
+    ///
     /// Returns (slug_hash, scores) pairs.
     pub fn score_all_pages(
         &self,
@@ -394,8 +397,34 @@ impl KeyStore {
         outlier_indices: &[u8],
     ) -> Result<Vec<(u64, Vec<f32>)>> {
         let head_dim = self.config.head_dim as usize;
-        let query_compressed = sketch.quantize(query, 1, outlier_indices)?;
+        let _ = outlier_indices;
 
+        #[cfg(feature = "gpu")]
+        {
+            let total_vectors: usize = self
+                .index
+                .iter()
+                .filter_map(|e| self.get_page(e.slug_hash))
+                .map(|p| p.num_vectors as usize)
+                .sum();
+
+            if total_vectors >= crate::gpu::gpu_min_batch()
+                && crate::gpu::GpuContext::get().is_some()
+            {
+                return self.score_all_pages_gpu_batch(query, sketch, head_dim);
+            }
+        }
+
+        self.score_all_pages_cpu(query, sketch, head_dim)
+    }
+
+    /// CPU path: float x sign scoring via sketch.score() per page.
+    fn score_all_pages_cpu(
+        &self,
+        query: &[f32],
+        sketch: &crate::sketch::QJLSketch,
+        head_dim: usize,
+    ) -> Result<Vec<(u64, Vec<f32>)>> {
         let mut results = Vec::with_capacity(self.index.len());
         for entry in &self.index {
             let page = match self.get_page(entry.slug_hash) {
@@ -403,13 +432,99 @@ impl KeyStore {
                 None => continue,
             };
             let keys = page.to_compressed_keys(head_dim);
-            let mut page_scores = Vec::with_capacity(keys.num_vectors);
-            for j in 0..keys.num_vectors {
-                let s = sketch.score_compressed_pair(&query_compressed, 0, &keys, j)?;
-                page_scores.push(s);
-            }
-            results.push((entry.slug_hash, page_scores));
+            let scores = sketch.score(query, &keys)?;
+            results.push((entry.slug_hash, scores));
         }
+        Ok(results)
+    }
+
+    /// GPU path: batch all pages into a single GPU dispatch.
+    #[cfg(feature = "gpu")]
+    fn score_all_pages_gpu_batch(
+        &self,
+        query: &[f32],
+        sketch: &crate::sketch::QJLSketch,
+        head_dim: usize,
+    ) -> Result<Vec<(u64, Vec<f32>)>> {
+        use crate::error::validate_finite;
+        use crate::sketch::matvec;
+
+        let d = sketch.head_dim;
+        let s = sketch.sketch_dim;
+        let os = sketch.outlier_sketch_dim;
+
+        validate_finite(query, "score_all_pages query")?;
+
+        let q_sketch = matvec(&sketch.proj_dir_quant, s, d, query);
+        let mut q_outlier_sketch = vec![0.0f32; s];
+        if let Some(first_entry) = self.index.first() {
+            if let Some(first_page) = self.get_page(first_entry.slug_hash) {
+                let first_keys = first_page.to_compressed_keys(head_dim);
+                for &idx in &first_keys.outlier_indices {
+                    let j = idx as usize;
+                    let row_start = j * s;
+                    for (p, qos) in q_outlier_sketch.iter_mut().enumerate().take(s) {
+                        *qos += query[j] * sketch.proj_dir_score[row_start + p];
+                    }
+                }
+            }
+        }
+        let q_inlier_sketch: Vec<f32> = q_sketch
+            .iter()
+            .zip(q_outlier_sketch.iter())
+            .map(|(f, o)| f - o)
+            .collect();
+
+        let scl = (std::f32::consts::FRAC_PI_2).sqrt() / s as f32;
+        let scl_outlier = (std::f32::consts::FRAC_PI_2).sqrt() / os as f32;
+
+        let mut all_key_quant = Vec::new();
+        let mut all_key_outlier_quant = Vec::new();
+        let mut all_key_norms = Vec::new();
+        let mut all_outlier_norms = Vec::new();
+        let mut page_boundaries: Vec<(u64, usize)> = Vec::new();
+
+        for entry in &self.index {
+            let page = match self.get_page(entry.slug_hash) {
+                Some(p) => p,
+                None => continue,
+            };
+            let keys = page.to_compressed_keys(head_dim);
+            page_boundaries.push((entry.slug_hash, keys.num_vectors));
+            all_key_quant.extend_from_slice(&keys.key_quant);
+            all_key_outlier_quant.extend_from_slice(&keys.key_outlier_quant);
+            all_key_norms.extend_from_slice(&keys.key_norms);
+            all_outlier_norms.extend_from_slice(&keys.outlier_norms);
+        }
+
+        let total_vectors = all_key_norms.len();
+        if total_vectors == 0 {
+            return Ok(Vec::new());
+        }
+
+        let gpu = crate::gpu::GpuContext::get().expect("GPU checked by caller");
+        let all_scores = gpu.score_float_sign_batch(
+            &q_inlier_sketch,
+            &q_outlier_sketch[..os],
+            &all_key_quant,
+            &all_key_outlier_quant,
+            &all_key_norms,
+            &all_outlier_norms,
+            total_vectors,
+            s,
+            os,
+            scl,
+            scl_outlier,
+        );
+
+        let mut results = Vec::with_capacity(page_boundaries.len());
+        let mut offset = 0;
+        for (slug_hash, num_vectors) in page_boundaries {
+            let page_scores = all_scores[offset..offset + num_vectors].to_vec();
+            offset += num_vectors;
+            results.push((slug_hash, page_scores));
+        }
+
         Ok(results)
     }
 }
@@ -871,23 +986,116 @@ mod tests {
         }
 
         let query = random_vec(16, &mut rng);
-        let query_compressed = sketch.quantize(&query, 1, &outlier_indices).unwrap();
 
         let batch_results = store
             .score_all_pages(&query, &sketch, &outlier_indices)
             .unwrap();
 
-        // Compare with per-page scoring
+        // Compare with per-page sketch.score() (same float x sign method)
         for (slug_hash, batch_scores) in &batch_results {
             let page = store.get_page(*slug_hash).unwrap();
             let keys = page.to_compressed_keys(16);
-            for (j, &batch_s) in batch_scores.iter().enumerate() {
-                let per_page_s = sketch
-                    .score_compressed_pair(&query_compressed, 0, &keys, j)
-                    .unwrap();
+            let per_page_scores = sketch.score(&query, &keys).unwrap();
+            for (j, (&batch_s, &per_page_s)) in
+                batch_scores.iter().zip(per_page_scores.iter()).enumerate()
+            {
                 assert!(
                     (batch_s - per_page_s).abs() < 1e-6,
                     "slug {slug_hash} vec {j}: batch={batch_s}, per_page={per_page_s}"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "gpu")]
+mod gpu_tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha20Rng;
+    use rand_distr::{Distribution, StandardNormal};
+    use tempfile::tempdir;
+
+    fn random_vec(d: usize, rng: &mut ChaCha20Rng) -> Vec<f32> {
+        let normal: StandardNormal = StandardNormal;
+        (0..d)
+            .map(|_| {
+                let v: f64 = normal.sample(rng);
+                v as f32
+            })
+            .collect()
+    }
+
+    fn test_config() -> KeysConfig {
+        KeysConfig {
+            head_dim: 16,
+            sketch_dim: 32,
+            outlier_sketch_dim: 16,
+            seed: 42,
+        }
+    }
+
+    #[test]
+    #[ignore] // requires GPU adapter
+    fn test_score_all_pages_gpu_dispatch() {
+        let dir = tempdir().unwrap();
+        let config = test_config();
+        let mut store = KeyStore::create(dir.path(), config.clone()).unwrap();
+        let sketch = config.build_sketch();
+
+        let mut rng = ChaCha20Rng::seed_from_u64(950);
+        let outlier_indices = vec![0u8];
+        for slug in 0u64..5 {
+            let keys = random_vec(4 * 16, &mut rng);
+            let compressed = sketch.quantize(&keys, 4, &outlier_indices).unwrap();
+            store.append(slug, slug * 100, &compressed).unwrap();
+        }
+
+        let query = random_vec(16, &mut rng);
+        let results = store
+            .score_all_pages(&query, &sketch, &outlier_indices)
+            .unwrap();
+
+        assert_eq!(results.len(), 5);
+        for (slug_hash, scores) in &results {
+            assert_eq!(scores.len(), 4);
+            for s in scores {
+                assert!(s.is_finite(), "non-finite score for slug {slug_hash}");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore] // requires GPU adapter
+    fn test_score_all_pages_gpu_results_valid() {
+        let dir = tempdir().unwrap();
+        let config = test_config();
+        let mut store = KeyStore::create(dir.path(), config.clone()).unwrap();
+        let sketch = config.build_sketch();
+
+        let mut rng = ChaCha20Rng::seed_from_u64(960);
+        let outlier_indices = vec![0u8];
+        let num_pages = 10;
+        for slug in 0..num_pages as u64 {
+            let keys = random_vec(4 * 16, &mut rng);
+            let compressed = sketch.quantize(&keys, 4, &outlier_indices).unwrap();
+            store.append(slug, slug, &compressed).unwrap();
+        }
+
+        let query = random_vec(16, &mut rng);
+        let results = store
+            .score_all_pages(&query, &sketch, &outlier_indices)
+            .unwrap();
+
+        // Verify correct page count and all scores finite
+        assert_eq!(results.len(), num_pages);
+        for (slug_hash, scores) in &results {
+            assert_eq!(scores.len(), 4);
+            for (j, s) in scores.iter().enumerate() {
+                assert!(
+                    s.is_finite(),
+                    "non-finite score for slug {slug_hash} vec {j}"
                 );
             }
         }
