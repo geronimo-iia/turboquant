@@ -2,24 +2,43 @@
 
 ## Goal
 
-A standalone Rust crate (`qjl-sketch`) that compresses vectors via
-QJL sign-based hashing and scores queries against compressed stores —
-no LLM, no GPU, CPU-only.
+A standalone Rust crate (`qjl-sketch`) for vector compression and
+scoring — QJL sign-based hashing, Lloyd-Max codebook quantization,
+and TurboQuant MSE-optimal pipeline. CPU-first, GPU-optional.
 
 ## Completed
 
-| Phase | What | Tests |
-|-------|------|-------|
-| 0 | Project scaffold — CI, release, dependabot, docs, licenses | — |
-| 1 | Core algorithms — sketch, outliers, quantize, score, values, streaming quantizer | 32 |
-| 2 | Quality validation — distortion, ranking, outlier benefit, value accuracy | 9 |
-| 3 | Persistence — KeyStore, ValueStore, staleness, compaction, crash recovery | 34 |
-| 4 | Benchmarks — score, compress, store latency with criterion | — |
-| 5 | Error types + input validation — `QjlError` enum, all public API returns `Result` | 18 |
+| Phase | What | Version |
+|-------|------|---------|
+| 0 | Project scaffold — CI, release, dependabot, docs, licenses | 0.1.0 |
+| 1 | Core algorithms — sketch, outliers, quantize, score, values, streaming quantizer | 0.1.0 |
+| 2 | Quality validation — distortion, ranking, outlier benefit, value accuracy | 0.1.0 |
+| 3 | Persistence — KeyStore, ValueStore, staleness, compaction, crash recovery | 0.1.0 |
+| 4 | Benchmarks — score, compress, store latency with criterion | 0.1.0 |
+| 5 | Error types + input validation — `QjlError` enum, all public API returns `Result` | 0.2.0 |
+| 6 | Lloyd-Max codebook — optimal scalar quantization (1–8 bit) | 0.3.0 |
+| 7 | Math helpers — lgamma, beta_pdf, normal_icdf, Simpson's rule | 0.3.0 |
+| 8 | Compressed-vs-compressed scoring — Hamming cosine estimator | 0.3.0 |
+| 9 | Rust 2024 edition upgrade | 0.3.0 |
+| 10 | MSE-optimal quantization — RandomRotation + Lloyd-Max per-coordinate | 0.4.0 |
+| 11 | Serde support — feature-gated, streaming store export/import | 0.4.0 |
+| 12 | Examples — basic_qjl, compressed_scoring, mse_quantization, serde_roundtrip, store_export_import | 0.4.0 |
 
-93 tests. Published on [crates.io](https://crates.io/crates/qjl-sketch).
+159 tests (with `--features serde`). Published on [crates.io](https://crates.io/crates/qjl-sketch).
 
-## Future
+## Next
+
+- GPU acceleration (WGPU)
+
+
+### Full TurboQuant pipeline (`turbo.rs`)
+
+Combine rotation + Lloyd-Max + QJL residual correction for the
+complete TurboQuant two-stage pipeline (b-1 bits codebook + 1 bit
+residual sign = b bits total per coordinate).
+
+See [docs/prompts/two-stage-tasks.md](prompts/two-stage-tasks.md)
+for the design and layering plan.
 
 ### Performance optimization
 
@@ -28,24 +47,14 @@ no LLM, no GPU, CPU-only.
 - [ ] `rayon` parallelism for multi-page scoring
 - [ ] Batch append (amortize fsync cost)
 
-### Serde support
+### GPU acceleration (WGPU)
 
-Add `Serialize`/`Deserialize` on public structs for debug dumps and interop.
-
-- [ ] Add `serde = { version = "1", features = ["derive"] }` to dependencies
-- [ ] Derive `Serialize, Deserialize` on `CompressedKeys`
-- [ ] Derive `Serialize, Deserialize` on `CompressedValues`
-- [ ] Derive `Serialize, Deserialize` on `KeysConfig`, `ValuesConfig`
-- [ ] Derive `Serialize, Deserialize` on `IndexEntry`, `IndexMeta`
-- [ ] `QJLSketch`: serialize as params only (head_dim, sketch_dim,
-      outlier_sketch_dim, seed) — not the matrices
-- [ ] Tests: serde round-trip for each struct (serialize → deserialize → equal)
-- [ ] Feature-gate behind `serde` feature flag to keep default deps minimal
+- [ ] WGPU compute shaders for score kernels (single WGSL shader, runs on Vulkan/Metal/DX12)
+- [ ] See [docs/prompts/gpu-acceleration.md](prompts/gpu-acceleration.md)
 
 ### Other
 
-- GPU score kernel via `wgpu` compute shaders
-- W_q / W_k / W_v weight loading from GGUF or safetensors
+- [ ] W_q / W_k / W_v weight loading from GGUF or safetensors
 
 Pipeline integration (BM25 pre-filter + QJL rerank) lives in
 the [llm-wiki](https://github.com/geronimo-iia/llm-wiki) project.
