@@ -38,7 +38,9 @@ fn bench_score(c: &mut Criterion) {
             b.iter(|| {
                 let mut total_score = 0.0f32;
                 for compressed in &all_compressed {
-                    let scores = sketch.score(black_box(&query), black_box(compressed));
+                    let scores = sketch
+                        .score(black_box(&query), black_box(compressed))
+                        .unwrap();
                     total_score += scores.iter().sum::<f32>();
                 }
                 black_box(total_score)

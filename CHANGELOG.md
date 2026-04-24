@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] — TBD
 
+### Changed
+
+- Upgrade to Rust 2024 edition (`edition = "2024"` in Cargo.toml and rustfmt.toml)
+
+### Fixed
+
+- `benches/score.rs`: missing `.unwrap()` on `sketch.score()` Result
+
 ### Added
 
 - `codebook` module — Lloyd-Max optimal scalar quantization codebook
